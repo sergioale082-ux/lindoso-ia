@@ -772,3 +772,36 @@ function PdfCard({ code, open }) {
             {open ? 'Gerando o documento...' : 'Documento pronto'}
           </div>
         </div>
+      </div>
+      <div className="px-3 pb-3 text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap break-words max-h-28 overflow-hidden">
+        {preview}
+      </div>
+      <button
+        onClick={onDownload}
+        disabled={open}
+        className="w-full py-2.5 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80 disabled:opacity-50"
+      >
+        {state === 'ok' ? 'Baixado!' : state === 'erro' ? 'Não foi possível gerar o PDF' : 'Baixar PDF'}
+      </button>
+    </div>
+  )
+}
+
+function NameCard({ onSave }) {
+  const [v, setV] = useState('')
+  const submit = () => {
+    if (v.trim()) onSave(v)
+  }
+  return (
+    <div className="mt-6 w-full max-w-md rounded-2xl bg-zinc-100 dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 p-3 text-left">
+      <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-2">
+        Como posso chamar você? Vou lembrar do seu nome nas próximas conversas.
+      </p>
+      <div className="flex gap-2">
+        <input
+          value={v}
+          onChange={(e) => setV(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          placeholder="Seu nome"
+          maxLength={40}
+          className="flex-1 min-w-0 rounded-xl bg-white dark:bg-[#000000] text-zinc-900 dark:text-white border border-zinc-300 dark:border-transparent focus:border-teal-500 px-3 py-2.5 text-sm outline-none
