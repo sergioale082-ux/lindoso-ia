@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import logoUrl from './logo.png'
+import { askRelampago, askReserva, escolherModelo } from './rapido.js'
 
 /* ------------------------------------------------------------------ */
 /*  Configuração                                                       */
@@ -56,6 +57,16 @@ const streamUrl = (model) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`
 
 const ENV_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
+const ENV_GROQ = import.meta.env.VITE_GROQ_API_KEY || ''
+
+// Os 5 modelos do LINDOSO IA
+const MODELOS_INFO = [
+  ['1', 'Gemini 3.8', 'Principal'],
+  ['2', 'Groq Llama 70b', 'Reserva'],
+  ['3', 'DeepSeek', 'Arquivos'],
+  ['4', 'FLUX', 'Imagem (único)'],
+  ['5', 'Groq Qwen 8b Instant', 'Relâmpago para respostas rápidas'],
+]
 
 const LS = {
   convs: 'lindoso_conversas',
@@ -63,6 +74,7 @@ const LS = {
   key: 'lindoso_chave',
   model: 'lindoso_modelo',
   profile: 'lindoso_perfil',
+  groqKey: 'lindoso_chave_groq',
 }
 
 const MAX_CONVS = 20 // conversas lembradas
@@ -297,6 +309,8 @@ function httpError(status, raw, web) {
     !!err.busy ||
     status === 404 ||
     /no longer available|not found|not supported|deprecated/i.test(raw)
+  err.status = status
+  err.rateLimited = status === 429
   err.api = true
   return err
 }
@@ -532,7 +546,7 @@ function LogoMark({ size = 36 }) {
       height={size}
       draggable="false"
       style={{ width: size, height: size }}
-      className="shrink-0 rounded-[26%] object-cover shadow-lg shadow-violet-900/40 select-none"
+      className="shrink-0 rounded-[26%] object-cover shadow-lg shadow-teal-900/40 select-none"
     />
   )
 }
@@ -541,13 +555,13 @@ function Typing({ label = 'LINDOSO IA está digitando...' }) {
   return (
     <div className="flex items-end gap-2 max-w-[88%]">
       <LogoMark size={30} />
-      <div className="rounded-2xl rounded-bl-md px-4 py-3 bg-white dark:bg-[#25252f] shadow-sm">
+      <div className="rounded-2xl rounded-bl-md px-4 py-3 bg-white dark:bg-[#0a0a0a] shadow-sm">
         <div className="flex items-center gap-2.5">
           <span className="flex gap-1">
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
-                className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-bounce"
+                className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce"
                 style={{ animationDelay: `${i * 0.15}s` }}
               />
             ))}
@@ -838,7 +852,7 @@ function PdfCard({ code, open }) {
   }
 
   return (
-    <div className="rounded-xl overflow-hidden border border-violet-400/40 bg-violet-50 dark:bg-violet-500/10">
+    <div className="rounded-xl overflow-hidden border border-teal-400/40 bg-teal-50 dark:bg-teal-500/10">
       <div className="flex items-center gap-3 px-3 py-3">
         <div className="shrink-0 w-10 h-10 rounded-lg bg-red-500 text-white flex items-center justify-center text-[11px] font-bold">
           PDF
@@ -856,7 +870,7 @@ function PdfCard({ code, open }) {
       <button
         onClick={onDownload}
         disabled={open}
-        className="w-full py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-blue-600 active:opacity-80 disabled:opacity-50"
+        className="w-full py-2.5 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80 disabled:opacity-50"
       >
         {state === 'ok' ? 'Baixado!' : state === 'erro' ? 'Não foi possível gerar o PDF' : 'Baixar PDF'}
       </button>
@@ -871,7 +885,7 @@ function NameCard({ onSave }) {
     if (v.trim()) onSave(v)
   }
   return (
-    <div className="mt-6 w-full max-w-md rounded-2xl bg-white dark:bg-[#17171f] border border-zinc-200 dark:border-white/5 p-3 text-left">
+    <div className="mt-6 w-full max-w-md rounded-2xl bg-white dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 p-3 text-left">
       <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-2">
         Como posso chamar você? Vou lembrar do seu nome nas próximas conversas.
       </p>
@@ -882,12 +896,12 @@ function NameCard({ onSave }) {
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Seu nome"
           maxLength={40}
-          className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#0b0b12] border border-transparent focus:border-violet-500 px-3 py-2.5 text-sm outline-none"
+          className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#000000] border border-transparent focus:border-teal-500 px-3 py-2.5 text-sm outline-none"
         />
         <button
           onClick={submit}
           disabled={!v.trim()}
-          className="rounded-xl px-4 text-sm font-medium text-white bg-gradient-to-r from-violet-600 to-blue-600 disabled:opacity-40"
+          className="rounded-xl px-4 text-sm font-medium text-black bg-gradient-to-r from-teal-400 to-cyan-500 disabled:opacity-40"
         >
           Salvar
         </button>
@@ -916,8 +930,8 @@ function CodeBlock({ lang, code, open = false }) {
 
   if (isPrompt) {
     return (
-      <div className="rounded-xl overflow-hidden border border-violet-400/40 bg-violet-50 dark:bg-violet-500/10">
-        <div className="px-3 py-1.5 text-xs font-semibold text-violet-600 dark:text-violet-300">
+      <div className="rounded-xl overflow-hidden border border-teal-400/40 bg-teal-50 dark:bg-teal-500/10">
+        <div className="px-3 py-1.5 text-xs font-semibold text-teal-600 dark:text-teal-300">
           Prompt pronto
         </div>
         <div className="px-3 pb-3 text-sm whitespace-pre-wrap break-words max-h-80 overflow-y-auto thin-scroll">
@@ -925,7 +939,7 @@ function CodeBlock({ lang, code, open = false }) {
         </div>
         <button
           onClick={onCopy}
-          className="w-full py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-blue-600 active:opacity-80"
+          className="w-full py-2.5 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80"
         >
           {done === 'copy' ? 'Copiado!' : 'Copiar prompt'}
         </button>
@@ -946,7 +960,7 @@ function CodeBlock({ lang, code, open = false }) {
         <button
           onClick={onDownload}
           disabled={open}
-          className="flex-1 rounded-lg py-2 text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-blue-600 active:opacity-80 disabled:opacity-50"
+          className="flex-1 rounded-lg py-2 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80 disabled:opacity-50"
         >
           {open ? 'Gerando...' : done === 'down' ? 'Baixado!' : 'Baixar como arquivo'}
         </button>
@@ -1017,7 +1031,7 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-violet-600 text-white px-4 py-2.5 shadow-sm">
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-teal-700 text-white px-4 py-2.5 shadow-sm">
           {msg.files?.length > 0 && (
             <div className={`flex flex-wrap gap-1.5 ${msg.text ? 'mb-2' : ''}`}>
               {msg.files.map((f, i) => (
@@ -1036,7 +1050,7 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
               {msg.text}
             </div>
           )}
-          <div className="text-[10px] text-violet-200 text-right mt-1">{fmtTime(msg.ts)}</div>
+          <div className="text-[10px] text-teal-100/70 text-right mt-1">{fmtTime(msg.ts)}</div>
         </div>
       </div>
     )
@@ -1049,12 +1063,13 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
         className={`rounded-2xl rounded-bl-md px-4 py-2.5 shadow-sm min-w-0 max-w-full ${
           msg.error
             ? 'bg-red-50 text-red-800 dark:bg-red-950/60 dark:text-red-200 border border-red-300/50 dark:border-red-500/30'
-            : 'bg-white text-zinc-900 dark:bg-[#25252f] dark:text-zinc-100'
+            : 'bg-white text-zinc-900 dark:bg-[#0a0a0a] dark:text-white dark:border dark:border-teal-500/25'
         }`}
       >
         <div className="text-[15px] leading-relaxed">
           <RichText text={msg.text} streaming={!!msg.streaming} />
         </div>
+        {msg.footer && <div className="mt-1 text-[10px] text-teal-400/80">{msg.footer}</div>}
         {msg.notice && (
           <div className="mt-2 rounded-lg px-2.5 py-1.5 text-xs bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
             {msg.notice}
@@ -1072,7 +1087,7 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
                   href={s.uri}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="max-w-[200px] truncate rounded-full border border-zinc-300 dark:border-white/15 px-2.5 py-1 text-xs text-violet-600 dark:text-violet-300 hover:bg-violet-500/10"
+                  className="max-w-[200px] truncate rounded-full border border-zinc-300 dark:border-white/15 px-2.5 py-1 text-xs text-teal-600 dark:text-teal-300 hover:bg-teal-500/10"
                 >
                   {s.title}
                 </a>
@@ -1083,7 +1098,7 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
         {msg.action === 'settings' && (
           <button
             onClick={onOpenSettings}
-            className="mt-2 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium px-4 py-1.5"
+            className="mt-2 rounded-full bg-teal-400 hover:bg-teal-300 text-black text-sm font-medium px-4 py-1.5"
           >
             Abrir configurações
           </button>
@@ -1094,8 +1109,8 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
             {canTTS && !msg.error && onSpeak && (
               <button
                 onClick={() => onSpeak(msg)}
-                className={`-mr-2 p-2 rounded-full hover:bg-violet-500/10 ${
-                  speaking ? 'text-violet-500' : 'text-zinc-400 hover:text-violet-500'
+                className={`-mr-2 p-2 rounded-full hover:bg-teal-500/10 ${
+                  speaking ? 'text-teal-500' : 'text-zinc-400 hover:text-teal-500'
                 }`}
                 aria-label={speaking ? 'Parar a leitura' : 'Ouvir a resposta'}
               >
@@ -1113,8 +1128,11 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
 /*  Tela de configurações                                              */
 /* ------------------------------------------------------------------ */
 
-function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName, onClearHistory, onBack }) {
+function SettingsScreen({ theme, setTheme, userKey, onSaveKey, groqKey, onSaveGroqKey, name, onSaveName, onClearHistory, onBack }) {
   const [draft, setDraft] = useState(userKey)
+  const [groqDraft, setGroqDraft] = useState(groqKey)
+  const [groqShow, setGroqShow] = useState(false)
+  const [groqSaved, setGroqSaved] = useState(false)
   const [nameDraft, setNameDraft] = useState(name)
   const [nameSaved, setNameSaved] = useState(false)
   const [show, setShow] = useState(false)
@@ -1127,12 +1145,12 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
   }
 
   const card =
-    'rounded-2xl bg-white dark:bg-[#17171f] border border-zinc-200 dark:border-white/5 p-4'
+    'rounded-2xl bg-white dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 p-4'
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <header
-        className="flex items-center gap-3 px-3 pb-3 bg-white/90 dark:bg-[#12121a]/95 backdrop-blur border-b border-zinc-200 dark:border-white/5"
+        className="flex items-center gap-3 px-3 pb-3 bg-white/90 dark:bg-[#000000]/95 backdrop-blur border-b border-zinc-200 dark:border-teal-500/20"
         style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}
       >
         <button
@@ -1158,7 +1176,7 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
                 onClick={() => setTheme(val)}
                 className={`flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-medium border transition-colors ${
                   theme === val
-                    ? 'bg-violet-600 text-white border-violet-600'
+                    ? 'bg-teal-400 text-black border-teal-400'
                     : 'border-zinc-300 dark:border-white/10 hover:bg-zinc-100 dark:hover:bg-white/5'
                 }`}
               >
@@ -1181,7 +1199,7 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
             placeholder="Seu nome"
             maxLength={40}
             autoComplete="off"
-            className="w-full rounded-xl bg-zinc-100 dark:bg-[#0b0b12] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+            className="w-full rounded-xl bg-zinc-100 dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
           />
           <button
             onClick={() => {
@@ -1189,7 +1207,7 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
               setNameSaved(true)
               setTimeout(() => setNameSaved(false), 2000)
             }}
-            className="mt-3 w-full rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 text-white font-medium py-3"
+            className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
           >
             {nameSaved ? 'Nome salvo!' : 'Salvar nome'}
           </button>
@@ -1203,7 +1221,7 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
               href="https://aistudio.google.com/apikey"
               target="_blank"
               rel="noreferrer"
-              className="text-violet-500 underline"
+              className="text-teal-500 underline"
             >
               aistudio.google.com/apikey
             </a>
@@ -1218,7 +1236,7 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
               autoComplete="off"
               autoCapitalize="off"
               spellCheck="false"
-              className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#0b0b12] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+              className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
             />
             <button
               onClick={() => setShow((s) => !s)}
@@ -1229,7 +1247,7 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
           </div>
           <button
             onClick={handleSave}
-            className="mt-3 w-full rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 text-white font-medium py-3"
+            className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
           >
             {saved ? 'Chave salva!' : 'Salvar chave'}
           </button>
@@ -1238,6 +1256,68 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, name, onSaveName,
               Usando a chave do arquivo .env (VITE_GEMINI_API_KEY).
             </p>
           )}
+        </section>
+
+        <section className={card}>
+          <h2 className="font-semibold">Chave da API (Groq)</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 mb-3">
+            Usada pelo Relâmpago (respostas rápidas) e pelo Llama 70b (reserva do Gemini). Fica salva só neste
+            aparelho. Pega uma grátis em{' '}
+            <a
+              href="https://console.groq.com/keys"
+              target="_blank"
+              rel="noreferrer"
+              className="text-teal-500 underline"
+            >
+              console.groq.com/keys
+            </a>
+            .
+          </p>
+          <div className="flex gap-2">
+            <input
+              type={groqShow ? 'text' : 'password'}
+              value={groqDraft}
+              onChange={(e) => setGroqDraft(e.target.value)}
+              placeholder="gsk_..."
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck="false"
+              className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
+            />
+            <button
+              onClick={() => setGroqShow((v) => !v)}
+              className="rounded-xl px-3 text-sm border border-zinc-300 dark:border-white/10"
+            >
+              {groqShow ? 'Ocultar' : 'Ver'}
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              onSaveGroqKey(groqDraft.trim())
+              setGroqSaved(true)
+              setTimeout(() => setGroqSaved(false), 2000)
+            }}
+            className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
+          >
+            {groqSaved ? 'Chave salva!' : 'Salvar chave'}
+          </button>
+          {ENV_GROQ && !groqKey && (
+            <p className="text-xs text-zinc-500 mt-2">Usando a chave do arquivo .env (VITE_GROQ_API_KEY).</p>
+          )}
+        </section>
+
+        <section className={card}>
+          <h2 className="font-semibold mb-2">Os 5 modelos</h2>
+          <ul className="space-y-1.5 text-sm">
+            {MODELOS_INFO.map(([n, nome, papel]) => (
+              <li key={n} className="flex gap-2">
+                <span className="text-teal-400 font-semibold">{n}.</span>
+                <span>
+                  {nome} <span className="text-zinc-500 dark:text-zinc-400">· {papel}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section className={card}>
@@ -1271,6 +1351,7 @@ export default function App() {
   const [activeId, setActiveId] = useState(null)
   const [theme, setTheme] = useState(() => load(LS.theme, 'dark'))
   const [userKey, setUserKey] = useState(() => load(LS.key, ''))
+  const [groqKey, setGroqKey] = useState(() => load(LS.groqKey, ''))
   const [profile, setProfile] = useState(() => ({ name: cleanName(load(LS.profile, {})?.name) }))
   const [view, setView] = useState('chat') // 'chat' | 'settings'
   const [sidebar, setSidebar] = useState(false)
@@ -1302,12 +1383,13 @@ export default function App() {
   /* ---- persistência ---- */
   useEffect(() => save(LS.convs, convs), [convs])
   useEffect(() => save(LS.key, userKey), [userKey])
+  useEffect(() => save(LS.groqKey, groqKey), [groqKey])
   useEffect(() => save(LS.profile, profile), [profile])
   useEffect(() => {
     save(LS.theme, theme)
     document.documentElement.classList.toggle('dark', theme === 'dark')
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', theme === 'dark' ? '#0b0b12' : '#ffffff')
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff')
   }, [theme])
 
   /* ---- auto-scroll ---- */
@@ -1535,6 +1617,7 @@ export default function App() {
   }
 
   const saveKey = (k) => setUserKey(k)
+  const saveGroqKey = (k) => setGroqKey(k)
   const saveName = (n) => setProfile({ name: cleanName(n) })
 
   const send = async (raw) => {
@@ -1605,7 +1688,19 @@ export default function App() {
           )
         )
 
-      if (!apiKey) {
+      const web = files.length === 0 && needsWeb(text)
+      const memory = buildMemory(convs, convId)
+      const contents = toContents(history, filesRef.current)
+      const system = (mode) => buildInstruction({ name, memory, mode })
+      const groqAtual = groqKey || ENV_GROQ
+
+      // escolha do modelo: curta e simples -> Relâmpago; longa ou complexa -> Gemini 3.8
+      // (imagem -> FLUX e arquivo -> DeepSeek: seguem no Gemini até esses dois estarem ligados aqui)
+      let rota = escolherModelo(text, { temAnexo: files.length > 0, precisaWeb: needsWeb(text) })
+      if (rota === 'flux' || rota === 'deepseek') rota = 'gemini'
+      const usaRelampago = rota === 'relampago' && !!groqAtual
+
+      if (!apiKey && !usaRelampago) {
         push({
           id: uid(),
           role: 'model',
@@ -1617,12 +1712,8 @@ export default function App() {
         return
       }
 
-      const web = files.length === 0 && needsWeb(text)
-      const memory = buildMemory(convs, convId)
-      const contents = toContents(history, filesRef.current)
-
       setLoadingId(convId)
-      setLoadingWeb(web)
+      setLoadingWeb(web && !usaRelampago)
       setStreamText('')
 
       // o texto chega aos pedaços; atualiza a tela no máximo 1x por quadro
@@ -1635,17 +1726,48 @@ export default function App() {
             setStreamText(latest)
           })
       }
+      const limpaStream = () => {
+        cancelAnimationFrame(raf)
+        raf = 0
+        latest = ''
+        setStreamText('')
+      }
 
       try {
-        const r = await askGemini({
-          apiKey,
-          contents,
-          web,
-          onDelta,
-          system: (mode) => buildInstruction({ name, memory, mode }),
-        })
+        let r = null
+
+        // Modelo 5 (Relâmpago): se falhar por qualquer motivo, o Gemini assume
+        if (usaRelampago) {
+          try {
+            r = await askRelampago({ apiKey: groqAtual, contents, system: system('off'), onDelta })
+          } catch {
+            r = null
+            limpaStream()
+          }
+        }
+
+        if (!r) {
+          if (!apiKey) throw new Error('O Relâmpago não respondeu e falta a chave do Gemini. Abra Configurações.')
+          try {
+            r = await askGemini({ apiKey, contents, web, onDelta, system })
+          } catch (err) {
+            // Gemini deu limite 429 -> Groq Llama 70b como reserva
+            if (err.rateLimited && groqAtual) {
+              limpaStream()
+              const g = await askReserva({
+                apiKey: groqAtual,
+                contents,
+                onDelta,
+                system: system(web ? 'failed' : 'off'),
+              })
+              r = { ...g, sources: [], webFailed: web, reserva: true }
+            } else throw err
+          }
+        }
+
         const notices = []
-        if (r.webFailed)
+        if (r.reserva) notices.push('O Gemini atingiu o limite agora. Respondi com o Groq Llama 70b (reserva).')
+        if (r.webFailed && !r.reserva)
           notices.push('Não consegui pesquisar na internet agora. Esta informação pode estar desatualizada.')
         if (r.interrupted) notices.push('A resposta foi interrompida por uma falha de conexão.')
         push({
@@ -1653,8 +1775,9 @@ export default function App() {
           role: 'model',
           text: r.text,
           ts: Date.now(),
-          ...(r.sources.length ? { sources: r.sources.slice(0, 6) } : {}),
+          ...(r.sources?.length ? { sources: r.sources.slice(0, 6) } : {}),
           ...(notices.length ? { notice: notices.join(' ') } : {}),
+          ...(r.rotulo ? { footer: r.rotulo } : {}),
         })
       } catch (err) {
         push({ id: uid(), role: 'model', text: err.message, ts: Date.now(), error: true })
@@ -1691,7 +1814,7 @@ export default function App() {
   /* ---------------------------------------------------------------- */
 
   return (
-    <div className="h-[100dvh] flex bg-zinc-100 dark:bg-[#0b0b12] text-zinc-900 dark:text-zinc-100 overflow-hidden">
+    <div className="h-[100dvh] flex bg-zinc-100 dark:bg-[#000000] text-zinc-900 dark:text-zinc-100 overflow-hidden">
       {/* Fundo escuro do menu (celular) */}
       {sidebar && (
         <div className="fixed inset-0 bg-black/60 z-30 md:hidden" onClick={() => setSidebar(false)} />
@@ -1699,7 +1822,7 @@ export default function App() {
 
       {/* Menu lateral */}
       <aside
-        className={`fixed md:static inset-y-0 left-0 z-40 w-[85%] max-w-sm md:w-80 md:max-w-none flex flex-col bg-white dark:bg-[#12121a] border-r border-zinc-200 dark:border-white/5 transition-transform duration-200 ${
+        className={`fixed md:static inset-y-0 left-0 z-40 w-[85%] max-w-sm md:w-80 md:max-w-none flex flex-col bg-white dark:bg-[#000000] border-r border-zinc-200 dark:border-teal-500/20 transition-transform duration-200 ${
           sidebar ? 'translate-x-0' : '-translate-x-full'
         } md:translate-x-0`}
       >
@@ -1724,7 +1847,7 @@ export default function App() {
         <div className="px-4 space-y-3">
           <button
             onClick={newChat}
-            className="w-full flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-violet-600 to-blue-600 text-white font-medium py-3 shadow-lg shadow-violet-900/20 active:scale-[0.98] transition-transform"
+            className="w-full flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3 shadow-lg shadow-teal-900/20 active:scale-[0.98] transition-transform"
           >
             <Icon name="plus" className="w-5 h-5" />
             Nova conversa
@@ -1739,7 +1862,7 @@ export default function App() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar conversas"
-              className="w-full rounded-full bg-zinc-100 dark:bg-[#1c1c27] pl-9 pr-3 py-2.5 text-sm outline-none border border-transparent focus:border-violet-500"
+              className="w-full rounded-full bg-zinc-100 dark:bg-[#111111] pl-9 pr-3 py-2.5 text-sm outline-none border border-transparent focus:border-teal-500"
             />
           </div>
         </div>
@@ -1757,7 +1880,7 @@ export default function App() {
               key={c.id}
               className={`group flex items-center gap-1 rounded-xl pl-3 pr-1 mb-1 ${
                 c.id === activeId
-                  ? 'bg-violet-100 dark:bg-violet-500/15'
+                  ? 'bg-teal-100 dark:bg-teal-500/15'
                   : 'hover:bg-zinc-100 dark:hover:bg-white/5'
               }`}
             >
@@ -1777,7 +1900,7 @@ export default function App() {
         </div>
 
         <div
-          className="p-3 border-t border-zinc-200 dark:border-white/5"
+          className="p-3 border-t border-zinc-200 dark:border-teal-500/20"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }}
         >
           <button
@@ -1801,6 +1924,8 @@ export default function App() {
             setTheme={setTheme}
             userKey={userKey}
             onSaveKey={saveKey}
+            groqKey={groqKey}
+            onSaveGroqKey={saveGroqKey}
             name={profile.name}
             onSaveName={saveName}
             onClearHistory={clearHistory}
@@ -1810,7 +1935,7 @@ export default function App() {
           <>
             {/* Cabeçalho */}
             <header
-              className="flex items-center gap-3 px-3 pb-3 bg-white/90 dark:bg-[#12121a]/95 backdrop-blur border-b border-zinc-200 dark:border-white/5"
+              className="flex items-center gap-3 px-3 pb-3 bg-white/90 dark:bg-[#000000]/95 backdrop-blur border-b border-zinc-200 dark:border-teal-500/20"
               style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}
             >
               <button
@@ -1839,19 +1964,19 @@ export default function App() {
             {/* Mensagens */}
             <div
               ref={scrollRef}
-              className="flex-1 overflow-y-auto thin-scroll px-3 py-4 bg-[#eceef5] dark:bg-[#0b0b12]"
+              className="flex-1 overflow-y-auto thin-scroll px-3 py-4 bg-[#e8f7f5] dark:bg-[#000000]"
             >
               {!current || current.messages.length === 0 ? (
                 <div className="min-h-full flex flex-col items-center justify-center text-center px-4">
                   <LogoMark size={84} />
-                  <h2 className="mt-5 text-2xl font-extrabold bg-gradient-to-r from-violet-500 to-blue-500 bg-clip-text text-transparent">
+                  <h2 className="mt-5 text-2xl font-extrabold bg-gradient-to-r from-teal-300 to-cyan-400 bg-clip-text text-transparent">
                     {profile.name ? `${greeting()}, ${profile.name}!` : 'LINDOSO IA'}
                   </h2>
                   <p className="text-zinc-500 dark:text-zinc-400 mt-1">{subtitle}</p>
                   {lastConv && (
                     <button
                       onClick={() => openConv(lastConv.id)}
-                      className="mt-4 rounded-full border border-violet-500/50 text-violet-600 dark:text-violet-300 px-4 py-2 text-sm font-medium hover:bg-violet-500/10 active:scale-[0.98] transition"
+                      className="mt-4 rounded-full border border-teal-500/50 text-teal-600 dark:text-teal-300 px-4 py-2 text-sm font-medium hover:bg-teal-500/10 active:scale-[0.98] transition"
                     >
                       Continuar a conversa anterior
                     </button>
@@ -1862,7 +1987,7 @@ export default function App() {
                       <button
                         key={s}
                         onClick={() => send(s)}
-                        className="w-full text-left text-sm rounded-2xl px-4 py-3 bg-white dark:bg-[#17171f] border border-zinc-200 dark:border-white/5 hover:border-violet-500 active:scale-[0.99] transition"
+                        className="w-full text-left text-sm rounded-2xl px-4 py-3 bg-white dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 hover:border-teal-500 active:scale-[0.99] transition"
                       >
                         {s}
                       </button>
@@ -1896,7 +2021,7 @@ export default function App() {
 
             {/* Campo de envio */}
             <div
-              className="px-3 pt-2 bg-white dark:bg-[#12121a] border-t border-zinc-200 dark:border-white/5"
+              className="px-3 pt-2 bg-white dark:bg-[#000000] border-t border-zinc-200 dark:border-teal-500/20"
               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)' }}
             >
               <div className="max-w-3xl mx-auto">
@@ -1905,12 +2030,12 @@ export default function App() {
                     {pending.map((p) => (
                       <div
                         key={p.id}
-                        className="shrink-0 flex items-center gap-2 max-w-[220px] rounded-xl bg-zinc-100 dark:bg-[#1c1c27] pl-2 pr-1 py-1.5 text-xs"
+                        className="shrink-0 flex items-center gap-2 max-w-[220px] rounded-xl bg-zinc-100 dark:bg-[#111111] pl-2 pr-1 py-1.5 text-xs"
                       >
                         {p.preview ? (
                           <img src={p.preview} alt="" className="w-8 h-8 rounded-lg object-cover" />
                         ) : (
-                          <span className="w-8 h-8 rounded-lg bg-violet-500/15 text-violet-500 flex items-center justify-center">
+                          <span className="w-8 h-8 rounded-lg bg-teal-500/15 text-teal-500 flex items-center justify-center">
                             <Icon name="file" className="w-4 h-4" />
                           </span>
                         )}
@@ -1951,7 +2076,7 @@ export default function App() {
                     onKeyDown={onKeyDown}
                     placeholder={listening ? 'Ouvindo...' : 'Digite sua mensagem...'}
                     enterKeyHint="send"
-                    className="flex-1 min-w-0 resize-none rounded-3xl bg-zinc-100 dark:bg-[#1c1c27] px-4 py-3 text-[15px] outline-none border border-transparent focus:border-violet-500 max-h-36 leading-snug"
+                    className="flex-1 min-w-0 resize-none rounded-3xl bg-zinc-100 dark:bg-[#111111] px-4 py-3 text-[15px] outline-none border border-transparent focus:border-teal-500 max-h-36 leading-snug"
                   />
                   <button
                     onClick={toggleMic}
@@ -1967,7 +2092,7 @@ export default function App() {
                   <button
                     onClick={() => send()}
                     disabled={(!input.trim() && pending.length === 0) || loadingId !== null}
-                    className="shrink-0 w-12 h-12 rounded-full bg-gradient-to-br from-violet-600 to-blue-600 text-white flex items-center justify-center shadow-lg shadow-violet-900/30 disabled:opacity-40 active:scale-95 transition"
+                    className="shrink-0 w-12 h-12 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500 text-black flex items-center justify-center shadow-lg shadow-teal-900/30 disabled:opacity-40 active:scale-95 transition"
                     aria-label="Enviar"
                   >
                     <Icon name="send" className="w-5 h-5" />
@@ -1982,7 +2107,7 @@ export default function App() {
       {/* Aviso rápido */}
       {toast && (
         <div
-          className="fixed left-1/2 -translate-x-1/2 z-50 max-w-[90%] rounded-full bg-zinc-900 text-white text-sm px-4 py-2 shadow-lg text-center"
+          className="fixed left-1/2 -translate-x-1/2 z-50 max-w-[90%] rounded-full bg-[#0a0a0a] border border-teal-500/40 text-white text-sm px-4 py-2 shadow-lg text-center"
           style={{ bottom: 'calc(env(safe-area-inset-bottom) + 84px)' }}
           role="status"
         >
