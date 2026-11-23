@@ -4,21 +4,34 @@
 
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  color-scheme: dark;
 }
 
 * {
   -webkit-tap-highlight-color: transparent;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
-  background: #0b0b0c;
   overscroll-behavior: none;
   overscroll-behavior-y: none;
   touch-action: manipulation;
   -webkit-overflow-scrolling: touch;
+}
+
+html:not(.dark),
+html:not(.dark) body {
+  background: #ffffff;
+  color: #09090b;
+  color-scheme: light;
+}
+
+html.dark,
+html.dark body {
+  background: #000000;
+  color: #f4f4f5;
+  color-scheme: dark;
 }
 
 body {
@@ -47,6 +60,7 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.15);
+  background: rgba(120, 120, 128, 0.28);
   border-radius: 999px;
 }
+
