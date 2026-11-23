@@ -1,46 +1,96 @@
 /* ------------------------------------------------------------------ */
-/*  LINDOSO IA · Modelo 4: FLUX (imagem, único)                        */
-/*  Usa o FLUX pelo endpoint gratuito do Pollinations (sem chave).     */
-/*  Se o Groq estiver ligado, o pedido é traduzido para inglês e       */
-/*  melhorado antes (o FLUX entende inglês bem melhor).                */
+/*  LINDOSO IA · Modelo 4: FLUX (imagem)                              */
+/*  Melhora o prompt (quando há chave Groq) e tenta gerar a imagem    */
+/*  com nova tentativa automática se o servidor engasgar.             */
 /* ------------------------------------------------------------------ */
 
 import { melhorarPromptImagem } from './rapido.js'
 
-export const FLUX_URL = 'https://image.pollinations.ai/prompt/'
+const ENDPOINTS = [
+  (prompt, seed) =>
+    `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=flux&width=768&height=768&nologo=true&enhance=true&seed=${seed}`,
+  (prompt, seed) =>
+    `https://pollinations.ai/p/${encodeURIComponent(prompt)}?width=768&height=768&nologo=true&seed=${seed}`,
+]
 
-// tira "gera uma imagem de" e deixa só a descrição
 const COMANDO_RE =
   /^\s*(?:por favor[, ]*)?(?:gera|gere|gerar|cria|crie|criar|faz|faça|faca|fazer|desenha|desenhe|desenhar|monta|monte)\s+(?:uma?|as?|os?)?\s*(?:imagem|foto|desenho|ilustra[cç][aã]o|arte|logo|logotipo|wallpaper)\s*(?:de|do|da|com)?\s*/i
 
-export const descricaoDaImagem = (texto) => texto.replace(COMANDO_RE, '').trim() || texto.trim()
+export const descricaoDaImagem = (texto) =>
+  texto.replace(COMANDO_RE, '').trim() || texto.trim()
 
-// espera a imagem carregar de verdade (para avisar se falhar)
-const carregar = (url, ms = 70000) =>
+const carregarImagem = (url, ms = 45000) =>
   new Promise((resolve, reject) => {
     const img = new Image()
-    const t = setTimeout(() => reject(new Error('demorou')), ms)
+    img.crossOrigin = 'anonymous'
+    const timer = setTimeout(() => {
+      img.src = ''
+      reject(new Error('timeout'))
+    }, ms)
+
     img.onload = () => {
-      clearTimeout(t)
-      resolve(url)
+      clearTimeout(timer)
+      if (!img.naturalWidth || !img.naturalHeight) {
+        reject(new Error('empty'))
+        return
+      }
+      // Tenta converter para Blob URL para evitar bloqueio posterior ou falhas de cache
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(URL.createObjectURL(blob))
+          } else {
+            resolve(url)
+          }
+        }, 'image/png')
+      } catch {
+        resolve(url)
+      }
     }
+
     img.onerror = () => {
-      clearTimeout(t)
-      reject(new Error('falhou'))
+      clearTimeout(timer)
+      reject(new Error('error'))
     }
+
     img.src = url
   })
 
 /** Gera a imagem. Devolve { url }. Lança erro amigável se não conseguir. */
 export async function gerarImagem({ texto, groqKey }) {
-  const descricao = await melhorarPromptImagem(groqKey, descricaoDaImagem(texto))
-  const seed = Math.floor(Math.random() * 1e6)
-  const url =
-    FLUX_URL + encodeURIComponent(descricao.slice(0, 600)) + `?model=flux&width=768&height=768&nologo=true&seed=${seed}`
+  const baseDesc = descricaoDaImagem(texto)
+  let promptFinal = baseDesc
   try {
-    await carregar(url)
+    promptFinal = await melhorarPromptImagem(groqKey, baseDesc)
   } catch {
-    throw new Error('Não consegui criar a imagem agora. Tente de novo em instantes.')
+    promptFinal = baseDesc
   }
-  return { url }
+
+  const limpo = String(promptFinal || baseDesc)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500)
+
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
+    const seed = Math.floor(Math.random() * 1e7) + tentativa * 137
+    for (const buildUrl of ENDPOINTS) {
+      const url = buildUrl(limpo, seed)
+      try {
+        const resolvedUrl = await carregarImagem(url)
+        return { url: resolvedUrl }
+      } catch {
+        // tenta próximo endpoint / próxima seed
+      }
+    }
+  }
+
+  throw new Error(
+    'O gerador de imagens está com limite temporário ou instável agora. Tente novamente em alguns instantes.'
+  )
 }
+
