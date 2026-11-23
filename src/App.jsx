@@ -1,153 +1,248 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import logoUrl from './logo.png'
-import { askRelampago, askReserva, escolherModelo } from './rapido.js'
-import { askDeepSeek } from './deepseek.js'
-import { gerarImagem } from './flux.js'
-/* ------------------------------------------------------------------ */
-/* Configuração */
-/* ------------------------------------------------------------------ */
-const SYSTEM_PROMPT = 'You are LINDOSO IA, an AI assistant created by Lindoso, from Belém, Pará, Brazil. ' + 'You are professional, courteous, clear and objective, with a warm and friendly tone. ' + 'You never use slang or street talk (no "mano", "bora", "kkkk" and similar). ' + 'You always answer in Brazilian Portuguese, unless the user writes in another language. ' + 'You help with 【entity-Honor of Kings¦canonical_name=Honor of Kings】 (the user is Gold rank, wants to reach Platinum and plays Clash Lane / Mid), Vainglory, school, daily life and any other subject. ' + 'You explain things simply and accurately, in short paragraphs, and you are never boring or robotic.'
-const TRAINING = [
-'SPECIALTY - you are an expert in 3 things:',
-'1. Creating complete files (HTML, CSS, JS, TXT, MD, JSON and PDF).',
-'2. Creating perfect prompts for any AI (Claude, Gemini, ChatGPT, Midjourney, etc.).',
-'3. Reading and summarizing files sent by the user (images, PDFs and text files).',
-'',
-'TRAINING RULES:',
-'- Whenever the user asks for a file, deliver the COMPLETE content, never half of it, and explain briefly how to use it.',
-'- Whenever the user asks for a prompt, deliver exactly 1 single prompt, ready to copy, never 2 separate prompts.',
-'- Whenever the user asks to improve a prompt, merge everything into 1 single prompt and explain what you fixed.',
-'- When the user sends a file, read it carefully and, unless they ask for something else, reply with a clear summary: main idea, key points and anything that needs attention.',
-'- If the request is confusing, ask what the goal is before creating.',
-'- Keep a professional, courteous and objective tone. Never use slang.',
-'',
-'OUTPUT FORMAT (the app depends on this, always follow it):',
-'- Put every file inside its own fenced code block tagged with the language: html, css, js, json, md or txt. One block per file. Never split one file into several blocks. If the file content itself contains triple backticks, open and close that block with four backticks instead.',
-'- When the user asks for a text file ("cria um texto", "cria um arquivo de texto"), put the whole text inside ONE block tagged "txt".',
-'- When the user asks for a PDF ("cria um PDF", "gera um PDF", "faz um relatório em PDF"), put the whole document inside ONE fenced block tagged exactly "pdf". Inside it use simple Markdown only: "# Title" for the title, "## Section" for sections, "- " for bullet points and a blank line between paragraphs. No tables, no images, no code. The app turns this block into a real PDF with a download button. Outside the block write just one short sentence.',
-'- Put every prompt inside ONE fenced block tagged exactly "prompt" (three backticks followed by the word prompt). Only the prompt itself goes inside the block, with no explanations. Your explanation goes outside the block.',
-'- Never put normal conversation, tips or explanations inside code blocks.',
-'',
-'TRAINING EXAMPLES TO FOLLOW:',
-'User: "Cria um arquivo HTML de um site de HoK"',
-'LINDOSO IA: "Segue o arquivo completo. Salve como index.html e abra no navegador." followed by the complete code in one html block.',
-'',
-'User: "Faz um prompt pra criar um app de delivery"',
-'LINDOSO IA: "Segue um prompt único, já otimizado para o Claude:" followed by the single prompt in one prompt block.',
-'',
-'User: "Me ajuda a melhorar esse prompt"',
-'LINDOSO IA: "Seu prompt estava confuso em duas partes. Ajustei e reuni tudo em um só:" followed by the improved prompt in one prompt block, then a short explanation of what you fixed.',
-'',
-'User: "Cria um PDF com um plano de estudos de matemática"',
-'LINDOSO IA: "Segue o PDF com o plano de estudos." followed by the whole document in one pdf block that starts with "# Plano de estudos de Matemática".',
-].join('\n')
-const SYSTEM_INSTRUCTION = SYSTEM_PROMPT + '\n\n' + TRAINING
-const MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']
-const streamUrl = (model) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`
-const ENV_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
-const ENV_GROQ = import.meta.env.VITE_GROQ_API_KEY || ''
-const ENV_DEEPSEEK = import.meta.env.VITE_DEEPSEEK_API_KEY || ''
-const MODELOS_INFO = [
-['1', 'Gemini 3.8 Flash', 'Principal'],
-['2', 'Groq GPT-OSS 120b', 'Reserva'],
-['3', 'DeepSeek V4 Flash', 'Arquivos'],
-['4', 'FLUX', 'Imagem (único, sem chave)'],
-['5', 'Groq GPT-OSS 20b', 'Relâmpago para respostas rápidas'],
-]
-const LS = { convs: 'lindoso_conversas', theme: 'lindoso_tema', key: 'lindoso_chave', model: 'lindoso_modelo', profile: 'lindoso_perfil', groqKey: 'lindoso_chave_groq', deepseekKey: 'lindoso_chave_deepseek', }
-const MAX_CONVS = 20
-const MAX_FILES = 4
-const MAX_FILE = 10 * 1024 * 1024
-const MAX_TOTAL = 12 * 1024 * 1024
-const MAX_TEXT = 120000
-const SUGGESTIONS = [
-'Como subir de Gold para Platinum no 【entity-Honor of Kings¦canonical_name=Honor of Kings】?',
-'Explique uma build para jogar de Mid / Clash Lane',
-'Crie um arquivo HTML de um site de HoK',
-'Faça um prompt para criar um app de delivery',
-'Qual a previsão do tempo para hoje em Belém?',
-]
-const load = (k, fallback) => { try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v) } catch { return fallback } }
-const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-const fmtDate = (ts) => new Date(ts).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-const fmtTime = (ts) => new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-const clip = (t, n) => { const s = String(t).replace(/\s+/g, ' ').replace(/"/g, "'").trim(); return s.length > n ? s.slice(0, n) + '…' : s }
-const greeting = () => { const h = new Date().getHours(); if (h < 5) return 'Boa noite'; if (h < 12) return 'Bom dia'; if (h < 18) return 'Boa tarde'; return 'Boa noite' }
-const trimConvs = (list) => [...list].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CONVS)
-const cleanName = (s) => String(s || '').replace(/[^\p{L}\p{N} '’-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 40)
-const NAME_RE = /(?:meu nome (?:é|e)|me chamo|pode me chamar de|chamo-me)\s+([\p{L}][\p{L}'’-]{1,29})/iu
-const detectName = (text) => { const m = text.match(NAME_RE); if (!m) return ''; const n = cleanName(m[1]); return n ? n.charAt(0).toUpperCase() + n.slice(1) : '' }
-function buildMemory(convs, activeId) { const list = trimConvs(convs).filter((c) => c.id !== activeId && c.messages.length); if (!list.length) return ''; const lines = list.map((c, i) => { const last = [...c.messages].reverse().find((m) => m.role === 'user' && m.text); const extra = i < 5 && last ? ` | last user message: "${clip(last.text, 100)}"` : ''; return `- ${fmtDate(c.updatedAt)}: ${clip(c.title, 60)}${extra}` }); return 'PAST CONVERSATIONS (memory, most recent first):\n' + lines.join('\n') }
-function buildInstruction({ name, memory, mode }) { const parts = [SYSTEM_INSTRUCTION]; parts.push("CURRENT DATE AND TIME (user's device): " + new Date().toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) + '.'); if (name) parts.push(`USER MEMORY: the user's name is ${name}. Use the name naturally (for example in the greeting of the first reply of a conversation), without repeating it in every message.`); if (memory) parts.push(memory + '\nUse these past conversations only when relevant, to show continuity. Never invent memories that are not listed.'); if (mode === 'on') parts.push('WEB SEARCH: Google Search is enabled for this answer. Use it for current facts, base the answer on the results and mention the date or the source naturally (weather, news, prices, scores).'); else if (mode === 'failed') parts.push('WEB SEARCH: it is NOT available for this answer. Do not invent current data (weather, news, prices, scores). Say briefly that you could not check it online and offer general guidance only.'); return parts.join('\n\n') }
-const WEB_RE = /\b(hoje|agora|atualmente|atual|atuais|ultimas?|ultimos?|recentes?|noticias?|manchetes?|clima|previsao|temperatura|chover|chuva|cotacao|dolar|euro|bitcoin|placar|quem ganhou|resultado d[oae]s? (?:jogo|partida)|campeonato|eleicoes?|lancamento|nova versao|patch|atualizacao|esta semana|essa semana|amanha|ontem|mais recente|tempo em)\b/
-const needsWeb = (text) => WEB_RE.test(text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase())
-const IMG_OK = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif']
-const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|html?|css|jsx?|tsx?|xml|svg|py|java|c|cpp|h|cs|php|rb|go|rs|sql|ya?ml|log|ini|sh)$/i
-function fileKind(f) { const t = (f.type || '').toLowerCase(); if (IMG_OK.includes(t) || /\.hei[cf]$/i.test(f.name)) return 'image'; if (t === 'application/pdf' || /\.pdf$/i.test(f.name)) return 'pdf'; if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || TEXT_EXT.test(f.name)) return 'text'; return null }
-const mimeOf = (f, kind) => { if (kind === 'pdf') return 'application/pdf'; if (kind === 'text') return 'text/plain'; if (IMG_OK.includes(f.type)) return f.type; return /\.hei[cf]$/i.test(f.name) ? 'image/heic' : 'image/jpeg' }
-const toBase64 = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(',')[1] || ''); r.onerror = () => reject(new Error('read')); r.readAsDataURL(file) })
-async function prepareFiles(items) { return Promise.all(items.map(async ({ file, kind }) => { const base = { name: file.name, size: file.size, kind }; if (kind === 'text') { let t = await file.text(); if (t.length > MAX_TEXT) t = t.slice(0, MAX_TEXT) + '\n[... arquivo cortado por ser muito grande ...]'; return { ...base, mime: 'text/plain', text: t } } return { ...base, mime: mimeOf(file, kind), data: await toBase64(file) } })) }
-const DEFAULT_FILE_PROMPT = 'Leia o(s) arquivo(s) anexado(s) e faça um resumo claro, com os pontos principais.'
-function toContents(messages, filesMap) { const withFiles = messages.filter((m) => m.files?.length).map((m) => m.id); const fresh = new Set(withFiles.slice(-2)); return messages.map((m) => { const parts = []; let text = m.text || ''; if (m.role === 'user' && m.files?.length) { const data = filesMap.get(m.id); if (data && fresh.has(m.id)) { for (const f of data) { if (f.kind === 'text') parts.push({ text: `[Início do arquivo: ${f.name}]\n${f.text}\n[Fim do arquivo: ${f.name}]` }); else { parts.push({ text: `[Arquivo anexado: ${f.name}]` }); parts.push({ inlineData: { mimeType: f.mime, data: f.data } }) } } if (!text) text = DEFAULT_FILE_PROMPT } else { text = `${text}\n[Anexos enviados antes: ${m.files.map((f) => f.name).join(', ')}. O conteúdo não está mais disponível; baseie-se nas respostas anteriores.]`.trim() } } parts.push({ text: text || '...' }); return { role: m.role, parts } }) }
-const NET_MSG = 'Sem conexão com a internet. Confira o sinal e tente novamente.'
-function httpError(status, raw, web) { let err; if (web && [400, 403, 404, 429].includes(status) && /google_search|grounding|search|tool/i.test(raw)) { err = new Error('A pesquisa na internet não está disponível agora.'); err.searchUnavailable = true; err.api = true; return err } if (status === 400 && /api key/i.test(raw)) err = new Error('Essa chave da API não é válida. Cole uma chave nova em Configurações.'); else if (status === 403) err = new Error('A chave não tem permissão. Gere uma nova no Google AI Studio.'); else if (status === 429) err = new Error('Limite de mensagens do Gemini atingido. Aguarde um minuto e tente novamente.'); else if (status === 503 || /high demand|overloaded|try again later/i.test(raw)) { err = new Error('O Gemini está com muita demanda agora. Aguarde um minuto e tente novamente.'); err.busy = true } else err = new Error(raw || `Ocorreu o erro ${status} na API do Gemini.`); err.modelGone = !!err.busy || status === 404 || /no longer available|not found|not supported|deprecated/i.test(raw); err.status = status; err.rateLimited = status === 429; err.api = true; return err }
-async function callModelStream({ apiKey, model, contents, system, web, onDelta }) { let res; try { res = await fetch(streamUrl(model), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify({ system_instruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature: 0.9, maxOutputTokens: 8192 }, ...(web ? { tools: [{ google_search: {} }] } : {}), }), }) } catch { throw new Error(NET_MSG) } if (!res.ok) { const data = await res.json().catch(() => null); const e = Array.isArray(data) ? data[0] : data; throw httpError(res.status, e?.error?.message || '', web) } let text = ''; let block = ''; let interrupted = false; const sources = new Map(); const handle = (evt) => { const data = evt.split(/\r?\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join(''); if (!data || data === '[DONE]') return; let json; try { json = JSON.parse(data) } catch { return } if (json.error) throw httpError(json.error.code || 500, json.error.message || '', false); const cand = json.candidates?.[0]; const piece = (cand?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join(''); if (piece) { text += piece; onDelta?.(text) } for (const c of cand?.groundingMetadata?.groundingChunks || []) if (c.web?.uri && !sources.has(c.web.uri)) sources.set(c.web.uri, { uri: c.web.uri, title: c.web.title || c.web.uri }); if (json.promptFeedback?.blockReason) block = json.promptFeedback.blockReason }; try { if (res.body?.getReader) { const reader = res.body.getReader(); const decoder = new TextDecoder(); let buf = ''; for (;;) { const { done, value } = await reader.read(); if (done) break; buf += decoder.decode(value, { stream: true }); const events = buf.split(/\r?\n\r?\n/); buf = events.pop(); events.forEach(handle) } if (buf.trim()) handle(buf) } else { (await res.text()).split(/\r?\n\r?\n/).forEach(handle) } } catch (e) { if (!text) throw e.api ? e : new Error(NET_MSG); interrupted = true } if (!text) throw new Error(block ? 'O Gemini bloqueou essa mensagem. Tente falar de outro jeito.' : 'A IA não devolveu resposta. Tente novamente.'); return { text, sources: [...sources.values()], interrupted } }
-async function askGemini({ apiKey, contents, system, web, onDelta }) { const saved = load(LS.model, ''); const order = saved && MODELS.includes(saved) ? [saved, ...MODELS.filter((m) => m !== saved)] : MODELS; let lastErr; let busyErr; let useWeb = web; let webFailed = false; for (const model of order) { for (let attempt = 0; attempt < 2; attempt++) { try { const mode = useWeb ? 'on' : webFailed ? 'failed' : 'off'; const r = await callModelStream({ apiKey, model, contents, system: system(mode), web: useWeb, onDelta, }); save(LS.model, model); return { ...r, webFailed } } catch (err) { if (useWeb && err.searchUnavailable) { useWeb = false; webFailed = true; continue } lastErr = err; if (err.busy) busyErr = err; if (!err.modelGone) throw err; break } } } throw busyErr || lastErr }
-const SR = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
-const canTTS = typeof window !== 'undefined' && 'speechSynthesis' in window
-function speechText(md) { return md.replace(/````[\s\S]*?````|```[\s\S]*?```/g, ' (bloco de código omitido). ').replace(/https?:\/\/\S+/g, ' link ').replace(/[*`#>]+/g, '').replace(/^\s*[-•]\s+/gm, '').replace(/\s+/g, ' ').trim() }
-function chunkSpeech(text, max = 200) { const out = []; let cur = ''; for (const s of text.match(/[^.!?;:]+[.!?;:]*\s*/g) || []) { if (cur && (cur + s).length > max) { out.push(cur.trim()); cur = '' } cur += s; while (cur.length > max) { let cut = cur.lastIndexOf(' ', max); if (cut < 40) cut = max; out.push(cur.slice(0, cut).trim()); cur = cur.slice(cut) } } if (cur.trim()) out.push(cur.trim()); return out.filter(Boolean) }
-function pickVoice() { const vs = window.speechSynthesis.getVoices(); return (vs.find((v) => v.lang === 'pt-BR') || vs.find((v) => (v.lang || '').toLowerCase().startsWith('pt')) || null) }
-/* Ícones - ADICIONADO download e share */
-const PATHS = {
-menu: 'M4 6h16M4 12h16M4 18h16',
-plus: 'M12 5v14M5 12h14',
-search: 'M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z',
-trash: 'M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6',
-send: 'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z',
-sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
-back: 'M15 18l-6-6 6-6',
-x: 'M18 6L6 18M6 6l12 12',
-sun: 'M12 17a5 5 0 100-10 5 5 0 000 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4',
-moon: 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z',
-clip: 'M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48',
-mic: 'M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8',
-speaker: 'M11 5L6 9H2v6h4l5 4V5zM19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07',
-stop: 'M6 6h12v12H6z',
-file: 'M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9zM13 2v7h7',
-download: 'M12 3v12m0 0l-4-4m4 4l4-4M4 21h16',
-share: 'M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M16 6l-4-4-4 4M12 2v13',
+import React, { useState, useEffect, useRef } from 'react'
+
+const uid = () => Math.random().toString(36).slice(2, 10)
+const LS = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d } catch { return d } }
+const saveLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
+
+const downloadImage = async (url, name) => {
+  try {
+    const r = await fetch(url, { mode: 'cors' })
+    const b = await r.blob()
+    const u = URL.createObjectURL(b)
+    const a = document.createElement('a')
+    a.href = u; a.download = name || 'lindoso-imagem.png'
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(u), 3000)
+  } catch {
+    const a = document.createElement('a')
+    a.href = url; a.download = name || 'lindoso-imagem.png'; a.target = '_blank'
+    document.body.appendChild(a); a.click(); a.remove()
+  }
 }
-const Icon = ({ name, className = 'w-5 h-5' }) => (<svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[name]} /></svg>)
-/* LOGO (item 5): cole abaixo a URL do logo novo aprovado (turquesa brilhante, L branco, processador).
-   Vale para TODAS as telas, porque cabecalho, bolhas da IA e "digitando..." usam o componente LogoMark. */
-const LOGO_NOVO = ''
-const LOGO_URL = LOGO_NOVO || logoUrl
-function LogoMark({ size = 36 }) { return (<img src={LOGO_URL} alt="LINDOSO IA" width={size} height={size} draggable="false" style={{ width: size, height: size }} className="shrink-0 rounded-[26%] object-cover shadow-lg shadow-teal-900/40 select-none" />) }
-/* TELA CHEIA estilo Meta AI (itens 6 e 7): clique na foto abre aqui, sem barra de Ampliar/Baixar/Compartilhar dentro do chat.
-   Baixar: busca a imagem como blob e dispara a[download] (link direto falha cross-origin). Compartilhar: navigator.share com o ARQUIVO ( share de imagem de verdade no WhatsApp etc. ); sem suporte a arquivo, share do link; sem share nativo, copia o link. Fecha no X ou Esc.
-   Para ligar no componente principal (parte que faltou no arquivo): const [imagemAberta, setImagemAberta] = useState(''); passe onImageClick={setImagemAberta} para as mensagens e renderize <Lightbox url={imagemAberta} onClose={() => setImagemAberta('')} /> */
-function Lightbox({ url, onClose }) { const [state, setState] = useState(''); useEffect(() => { const onKey = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [onClose]); const baixar = async () => { setState('down'); try { const r = await fetch(url, { mode: 'cors' }); const b = await r.blob(); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'lindoso-ia.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1500) } catch { const a = document.createElement('a'); a.href = url; a.download = 'lindoso-ia.png'; a.target = '_blank'; a.rel = 'noreferrer'; document.body.appendChild(a); a.click(); a.remove() } setState('ok'); setTimeout(() => setState(''), 2000) }; const compartilhar = async () => { try { const r = await fetch(url, { mode: 'cors' }); const b = await r.blob(); const f = new File([b], 'lindoso-ia.png', { type: b.type || 'image/png' }); if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f] }); return } await navigator.share({ title: 'Imagem - LINDOSO IA', url }) } catch (e) { if (e && e.name === 'AbortError') return; try { await navigator.clipboard.writeText(url) } catch {} } }; return (<div className="fixed inset-0 z-[100] bg-black/90 flex flex-col" onClick={onClose}><div className="flex items-center justify-end gap-2 p-3 shrink-0" onClick={(e) => e.stopPropagation()}><button onClick={baixar} className="flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium px-4 py-2"><Icon name="download" className="w-5 h-5" /><span>{state === 'ok' ? 'Baixado!' : 'Baixar'}</span></button><button onClick={compartilhar} className="flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium px-4 py-2"><Icon name="share" className="w-5 h-5" /><span>Compartilhar</span></button><button onClick={onClose} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white" aria-label="Fechar"><Icon name="x" className="w-5 h-5" /></button></div><div className="flex-1 min-h-0 flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}><img src={url} alt="Imagem em tela cheia" className="max-w-full max-h-full object-contain rounded-xl" /></div></div>) }
-function Typing({ label = 'LINDOSO IA está digitando...' }) { return (<div className="flex items-end gap-2 max-w-[88%]"><LogoMark size={30} /><div className="rounded-2xl rounded-bl-md px-4 py-3 bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 shadow-sm"><div className="flex items-center gap-2.5"><span className="flex gap-1">{[0, 1, 2].map((i) => (<span key={i} className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />))}</span><span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span></div></div></div>) }
-function InlineText({ text }) { const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g); return tokens.map((t, i) => { if (t.startsWith('**') && t.endsWith('**') && t.length > 4) return (<strong key={i} className="font-semibold">{t.slice(2, -2)}</strong>); if (t.startsWith('`') && t.endsWith('`') && t.length > 2) return (<code key={i} className="px-1 py-0.5 rounded bg-black/10 dark:bg-white/10 text-[0.9em] font-mono">{t.slice(1, -1)}</code>); return <span key={i}>{t}</span> }) }
-const EXT = { html: 'html', htm: 'html', css: 'css', js: 'js', javascript: 'js', jsx: 'js', json: 'json', md: 'md', markdown: 'md', txt: 'txt', text: 'txt', plaintext: 'txt', xml: 'xml', svg: 'svg', csv: 'csv', py: 'py', python: 'py', }
-const MIME = { html: 'text/html', css: 'text/css', js: 'text/javascript', json: 'application/json', md: 'text/markdown', txt: 'text/plain', xml: 'application/xml', svg: 'image/svg+xml', csv: 'text/csv', py: 'text/x-python', }
-const BASE_NAME = { html: 'index', css: 'style', js: 'script', json: 'dados', md: 'LEIAME', txt: 'texto' }
-function fileInfo(lang, code) { let l = (lang || '').toLowerCase(); if (!l && /^\s*<(!doctype|html)/i.test(code)) l = 'html'; const ext = EXT[l] || 'txt'; return { ext, name: `${BASE_NAME[ext] || 'arquivo'}.${ext}`, mime: MIME[ext] || 'text/plain' } }
-function downloadFile(name, mime, content) { const blob = content instanceof Blob ? content : new Blob([content], { type: `${mime};charset=utf-8` }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500) }
-const HELV = [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,]
-const WIDE = { '…': 1000, '—': 1000, '–': 556, '•': 350, '“': 333, '”': 333, '‘': 222, '’': 222 }
-const CP1252 = { '€': 0x80, '…': 0x85, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, '™': 0x99, }
-const charW = (ch) => { let c = ch.charCodeAt(0); if (c < 32 || c > 126) { if (WIDE[ch]) return WIDE[ch]; c = ch.normalize('NFD').charCodeAt(0); if (c < 32 || c > 126) return 556 } return HELV[c - 32] }
-const pdfEsc = (s) => { let out = ''; for (const ch of s) { const c = ch.charCodeAt(0); let b = 63; if ((c >= 32 && c <= 126) || (c >= 160 && c <= 255)) b = c; else if (CP1252[ch]) b = CP1252[ch]; if (b === 40 || b === 41 || b === 92) out += '\\' + String.fromCharCode(b); else if (b < 32 || b > 126) out += '\\' + b.toString(8).padStart(3, '0'); else out += String.fromCharCode(b) } return out }
-function buildPdf(markdown) { const PW = 595.28; const PH = 841.89; const M = 56; const pages = [[]]; let y = PH - M; const width = (s, size, bold) => { let w = 0; for (const ch of s) w += charW(ch); return (w / 1000) * size * (bold ? 1.08 : 1) }; const wrap = (text, size, bold, max) => { const out = []; let cur = ''; for (const word of text.split(/\s+/).filter(Boolean)) { const test = cur ? cur + ' ' + word : word; if (width(test, size, bold) <= max) { cur = test; continue } if (cur) out.push(cur); let w = word; while (width(w, size, bold) > max && w.length > 1) { let n = w.length - 1; while (n > 1 && width(w.slice(0, n), size, bold) > max) n--; out.push(w.slice(0, n)); w = w.slice(n) } cur = w } if (cur) out.push(cur); return out }; const draw = (text, size, bold, x, max, before = 0, label = '') => { y -= before; wrap(text.replace(/\*([^*]+)\*/g, '$1'), size, bold, max).forEach((ln, i) => { const lead = size * 1.4; if (y - lead < M) { pages.push([]); y = PH - M } y -= lead; const ops = pages[pages.length - 1]; if (i === 0 && label) ops.push(`BT /F1 ${size} Tf ${(M + 4).toFixed(2)} ${y.toFixed(2)} Td (${pdfEsc(label)}) Tj ET`); ops.push(`BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x.toFixed(2)} ${y.toFixed(2)} Td (${pdfEsc(ln)}) Tj ET`) }) }; const full = PW - 2 * M; for (const raw of markdown.replace(/\r/g, '').split('\n')) { const line = raw.replace(/\*\*|__/g, '').replace(/`/g, '').replace(/\s+$/, ''); let m; if (!line.trim()) y -= 6; else if (/^\s*([-*_])\1{2,}\s*$/.test(line)) y -= 8; else if ((m = line.match(/^#\s+(.*)$/))) draw(m[1], 20, true, M, full, 8); else if ((m = line.match(/^##\s+(.*)$/))) draw(m[1], 15, true, M, full, 6); else if ((m = line.match(/^#{3,}\s+(.*)$/))) draw(m[1], 12.5, true, M, full, 4); else if ((m = line.match(/^\s*[-*•]\s+(.*)$/))) draw(m[1], 11, false, M + 22, full - 22, 0, '•'); else if ((m = line.match(/^\s*(\d+[.)])\s+(.*)$/))) draw(m[2], 11, false, M + 22, full - 22, 0, m[1]); else draw(line, 11, false, M, full) } const objs = []; const kids = []; objs[1] = '<< /Type /Catalog /Pages 2 0 R >>'; objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'; objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'; pages.forEach((ops, i) => { const stream = ops.join('\n'); const c = 5 + i * 2; objs[c] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`; objs[c + 1] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${c} 0 R >>`; kids.push(`${c + 1} 0 R`) }); objs[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages.length} >>`; let pdf = '%PDF-1.4\n'; const offsets = []; for (let i = 1; i < objs.length; i++) { offsets[i] = pdf.length; pdf += `${i} 0 obj\n${objs[i]}\nendobj\n` } const xref = pdf.length; pdf += `xref\n0 ${objs.length}\n0000000000 65535 f \n`; for (let i = 1; i < objs.length; i++) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`; pdf += `trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`; return new Blob([pdf], { type: 'application/pdf' }) }
-function pdfName(md) { const m = md.match(/^\s*#{1,3}\s+(.+)$/m); const base = (m ? m[1] : 'documento').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 50); return (base || 'documento') + '.pdf' }
-async function copyText(text) { try { await navigator.clipboard.writeText(text) } catch { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy') } catch {} ta.remove() } }
-function parseBlocks(text) { const blocks = []; let buf = []; let open = null; const flushText = () => { const t = buf.join('\n'); if (t.trim()) blocks.push({ type: 'text', text: t }); buf = [] }; for (const line of text.split('\n')) { if (!open) { const m = line.match(/^\s*(`{3,})([\w+-]*)\s*$/); if (m) { flushText(); open = { fence: m[1].length, lang: m[2], lines: [] } } else buf.push(line) } else { const m = line.match(/^\s*(`{3,})\s*$/); if (m && m[1].length >= open.fence) { blocks.push({ type: 'code', lang: open.lang, code: open.lines.join('\n') }); open = null } else open.lines.push(line) } } if (open) blocks.push({ type: 'code', lang: open.lang, code: open.lines.join('\n'), open: true }); flushText(); return blocks }
-function PdfCard({ code, open }) { const [state, setState] = useState(''); const name = pdfName(code); const preview = code.replace(/[#*`]/g, '').split('\n').filter((l) => l.trim()).slice(0, 6).join('\n'); const onDownload = () => { try { downloadFile(name, 'application/pdf', buildPdf(code)); setState('ok') } catch { setState('erro') } setTimeout(() => setState(''), 2000) }; return (<div className="rounded-xl overflow-hidden border border-teal-400/40 bg-teal-50 dark:bg-teal-500/10"><div className="flex items-center gap-3 px-3 py-3"><div className="shrink-0 w-10 h-10 rounded-lg bg-red-500 text-white flex items-center justify-center text-[11px] font-bold">PDF</div><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{name}</div><div className="text-xs text-zinc-500 dark:text-zinc-400">{open ? 'Gerando o documento...' : 'Documento pronto'}</div></div></div><div className="px-3 pb-3 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words max-h-28 overflow-hidden">{preview}</div><button onClick={onDownload} disabled={open} className="w-full py-2.5 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80 disabled:opacity-50">{state === 'ok' ? 'Baixado!' : state === 'erro' ? 'Não foi possível gerar o PDF' : 'Baixar PDF'}</button></div>) }
-function NameCard({ onSave }) { const [v, setV] = useState(''); const submit = () => { if (v.trim()) onSave(v) }; return (<div className="mt-6 w-full max-w-md rounded-2xl bg-white dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 p-3 text-left"><p className="text-sm text-zinc-600 dark:text-zinc-300 mb-2">Como posso chamar você? Vou lembrar do seu nome nas próximas conversas.</p><div className="flex gap-2"><input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} placeholder="Seu nome" maxLength={40} className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#000000] border border-transparent focus:border-teal-500 px-3 py-2.5 text-sm outline-none" /><button onClick={submit} disabled={!v.trim()} className="rounded-xl px-4 text-sm font-medium text-black bg-gradient-to-r from-teal-400 to-cyan-500 disabled:opacity-40">Salvar</button></div></div>) }
-function CodeBlock({ lang, code, open = false }) { const [done, setDone] = useState(''); const isPrompt = lang.toLowerCase() === 'prompt'; const info = fileInfo(lang, code); const flash = (k) => { setDone(k); setTimeout(() => setDone(''), 1800) }; const onCopy = async () => { await copyText(code); flash('copy') }; const onDownload = () => { downloadFile(info.name, info.mime, code); flash('down') }; if (isPrompt) { return (<div className="rounded-xl overflow-hidden border border-teal-400/40 bg-teal-50 dark:bg-teal-500/10"><div className="px-3 py-1.5 text-xs font-semibold text-teal-600 dark:text-teal-300">Prompt pronto</div><div className="px-3 pb-3 text-sm whitespace-pre-wrap break-words max-h-80 overflow-y-auto thin-scroll">{code}</div><button onClick={onCopy} className="w-full py-2.5 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80">{done === 'copy' ? 'Copiado!' : 'Copiar prompt'}</button></div>) } return (<div className="rounded-xl overflow-hidden bg-zinc-900 text-zinc-100 border border-white/10"><div className="flex items-center justify-between px-3 py-1.5 bg-black/40 text-xs text-zinc-400"><span>{lang || info.ext}</span><span>{info.name}</span></div><pre className="overflow-x-auto p-3 text-xs font-mono max-h-96 thin-scroll"><code>{code}</code></pre><div className="flex gap-2 p-2 bg-black/30"><button onClick={onDownload} disabled={open} className="flex-1 rounded-lg py-2 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80 disabled:opacity-50">{open ? 'Gerando...' : done === 'down' ? 'Baixado!' : 'Baixar como arquivo'}</button><button onClick={onCopy} className="rounded-lg px-4 py-2 text-sm font-medium border border-white/15 hover:bg-white/10">{done === 'copy' ? 'Copiado!' : 'Copiar'}</button></div></div>) }
-function TextLines({ text }) { return (<div className="space-y-1.5">{text.split('\n').map((line, j) => { if (line.trim() === '') return <div key={j} className="h-1" />; const bullet = line.match(/^\s*[-*]\s+(.*)$/); if (bullet) return (<div key={j} className="flex gap-2 pl-1"><span>•</span><span><InlineText text={bullet[1]} /></span></div>); const head = line.match(/^#{1,3}\s+(.*)$/); if (head) return (<div key={j} className="font-bold"><InlineText text={head[1]} /></div>); return (<div key={j}><InlineText text={line} /></div>) })}</div>) }
-function RichText({ text, streaming = false }) { return (<div className="space-y-2 break-words">{parseBlocks(text).map((b, i) => b.type === 'code' ? (b.lang.toLowerCase() === 'pdf' ? (<PdfCard key={i} code={b.code} open={streaming && !!b.open} />) : (<CodeBlock key={i} lang={b.lang} code={b.code} open={streaming && !!b.open} />)) : (<TextLines key={i} text={b.text} />))}</div>) }
-const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking = false, onImageClick }) { const isUser = msg.role === 'user'; if (isUser) { return (<div className="flex justify-end"><div className="max-w-[85%] rounded-2xl rounded-br-md bg-teal-700 text-white px-4 py-2.5 shadow-sm">{msg.files?.length > 0 && (<div className={`flex flex-wrap gap-1.5 ${msg.text ? 'mb-2' : ''}`}>{msg.files.map((f, i) => (<span key={i} className="inline-flex items-center gap-1.5 max-w-full rounded-lg bg-white/15 px-2 py-1 text-xs"><Icon name="file" className="w-3.5 h-3.5 shrink-0" /><span className="truncate max-w-[200px]">{f.name}</span></span>))}</div>)}{msg.text && (<div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">{msg.text}</div>)}<div className="text-[10px] text-teal-100/70 text-right mt-1">{fmtTime(msg.ts)}</div></div></div>) } return (<div className="flex items-end gap-2 max-w-[94%]"><LogoMark size={30} /><div className={`rounded-2xl rounded-bl-md px-4 py-2.5 shadow-sm min-w-0 max-w-full ${msg.error ? 'bg-red-50 text-red-800 dark:bg-red-950/60 dark:text-red-200 border border-red-300/50 dark:border-red-500/30' : 'bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 dark:border dark:border-teal-500/25'}`}><div className="text-[15px] leading-relaxed text-zinc-900 dark:text-zinc-100"><RichText text={msg.text} streaming={!!msg.streaming} /></div>{msg.image && (<img src={msg.image} alt="Imagem criada pelo FLUX" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none' }} onClick={() => onImageClick && onImageClick(msg.image)} className="mt-2 w-full max-w-[320px] rounded-xl border border-teal-500/30 cursor-pointer" />)}{msg.footer && <div className="mt-1 text-[10px] text-teal-400/80">{msg.footer}</div>}{msg.notice && (<div className="mt-2 rounded-lg px-2.5 py-1.5 text-xs bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">{msg.notice}</div>)}{msg.sources?.length > 0 && (<div className="mt-2"><div className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-1">Fontes da pesquisa</div><div className="flex flex-wrap gap-1.5">{msg.sources.map((s) => (<a key={s.uri} href={s.uri} target="_blank" rel="noreferrer noopener" className="max-w-[200px] truncate rounded-full border border-zinc-300 dark:border-white/15 px-2.5 py-1 text-xs text-teal-600 dark:text-teal-300 hover:bg-teal-500/10">{s.title}</a>))}</div></div>)}{msg.action === 'settings' && (<button onClick={onOpenSettings} className="mt-2 rounded-full bg-teal-400 hover:bg-teal-300 text-black text-sm font-medium px-4 py-1.5">Abrir configurações</button>)}{!msg.streaming && (<div className="flex items-center justify-between mt-1"><span className="text-[10px] text-zinc-400">{fmtTime(msg.ts)}</span>{canTTS && !msg.error && onSpeak && (<button onClick={() => onSpeak(msg)} className={`-mr-2 p-2 rounded-full hover:bg-teal-500/10 ${speaking ? 'text-teal-500' : 'text-zinc-400 hover:text-teal-500'}`} aria-label={speaking ? 'Parar a leitura' : 'Ouvir a resposta'}><Icon name={speaking ? 'stop' : 'speaker'} className="w-4 h-4" /></button>)}</div>)}</div></div>) })
+const shareImage = async (url, text) => {
+  try {
+    const r = await fetch(url, { mode: 'cors' })
+    const b = await r.blob()
+    const file = new File([b], 'lindoso-imagem.png', { type: b.type || 'image/png' })
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ title: 'LINDOSO IA', text: text || 'Imagem criada no LINDOSO IA', files: [file] })
+      return true
+    }
+    throw new Error('no-share')
+  } catch {
+    if (navigator.share) { try { await navigator.share({ title: 'LINDOSO IA', text: text || 'Imagem', url }); return true } catch {} }
+    await navigator.clipboard.writeText(url).catch(()=>{})
+    return false
+  }
+}
+
+async function gerarImagemHD(texto) {
+  const prompt = encodeURIComponent(texto + ', high quality, ultra detailed, sharp, 4k, professional lighting, no watermark, no text')
+  const q = LS('lindoso_qualidade_imagem', 'hd')
+  const sizes = { normal: '768x768', hd: '1024x1024', ultra: '1280x1280' }
+  const [w, h] = (sizes[q] || '1024x1024').split('x')
+  const url = `https://image.pollinations.ai/prompt/${prompt}?width=${w}&height=${h}&seed=${Date.now()}&model=flux&nologo=true&enhance=true`
+  return { url }
+}
+
+// ---- CHAT COM GEMINI REATIVADO ----
+async function falarComGemini(texto, historico) {
+  const key = LS('lindoso_gemini_key', '')
+  if (!key) return { error: 'sem-chave' }
+  const contents = [...historico.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: texto }] }]
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents, systemInstruction: { parts: [{ text: 'Você é o LINDOSO IA, um assistente brasileiro, simpático, direto, que fala como um amigo. Responda em português, de forma curta e útil.' }] } })
+  })
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message || 'Erro Gemini')
+  return { text: data.candidates?.[0]?.content?.parts?.[0]?.text || 'Não consegui responder agora.' }
+}
+
+function ImageViewer({ src, onClose, onDownload, onShare }) {
+  if (!src) return null
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col" onClick={onClose}>
+      <div className="flex justify-between items-center p-4 text-white">
+        <button onClick={onClose} className="px-5 py-2.5 rounded-full bg-white/15 font-bold">✕ Fechar</button>
+        <span className="text-xs opacity-70">Toque fora para fechar</span>
+      </div>
+      <div className="flex-1 flex items-center justify-center p-3" onClick={onClose}>
+        <img src={src} className="max-w-full max-h-full rounded-2xl object-contain" alt="Ampliada" />
+      </div>
+      <div className="p-4 flex gap-2 pb-6">
+        <button onClick={(e) => { e.stopPropagation(); onDownload() }} className="flex-1 py-4 rounded-2xl bg-teal-400 text-black font-bold">⬇ Baixar</button>
+        <button onClick={(e) => { e.stopPropagation(); onShare() }} className="flex-1 py-4 rounded-2xl bg-white/15 text-white font-bold">↗ Compartilhar</button>
+      </div>
+    </div>
+  )
+}
+
+export default function App() {
+  const [view, setView] = useState(() => sessionStorage.getItem('lindoso_view') || 'chat')
+  const [chats, setChats] = useState(() => LS('lindoso_chats', []))
+  const [activeId, setActiveId] = useState(() => sessionStorage.getItem('lindoso_active') || null)
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [lightbox, setLightbox] = useState(null)
+  const [toast, setToast] = useState('')
+  const [imgQ, setImgQ] = useState(() => LS('lindoso_qualidade_imagem', 'hd'))
+  const [memLimit, setMemLimit] = useState(() => LS('lindoso_memoria_limite', 20))
+  const [theme, setTheme] = useState(() => LS('lindoso_tema', 'dark'))
+  const [geminiKey, setGeminiKey] = useState(() => LS('lindoso_gemini_key', ''))
+  const scrollRef = useRef(null)
+
+  useEffect(() => { document.documentElement.style.overscrollBehavior = 'none'; document.body.style.overscrollBehavior = 'none' }, [])
+  useEffect(() => { saveLS('lindoso_chats', chats) }, [chats])
+  useEffect(() => { sessionStorage.setItem('lindoso_view', view); sessionStorage.setItem('lindoso_active', activeId || '') }, [view, activeId])
+  useEffect(() => { saveLS('lindoso_qualidade_imagem', imgQ); saveLS('lindoso_memoria_limite', memLimit); saveLS('lindoso_tema', theme); saveLS('lindoso_gemini_key', geminiKey) }, [imgQ, memLimit, theme, geminiKey])
+
+  const activeChat = chats.find(c => c.id === activeId) || null
+
+  const newChat = () => {
+    const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now() }
+    setChats(prev => [c, ...prev].slice(0, memLimit))
+    setActiveId(c.id); setView('chat')
+  }
+
+  const send = async () => {
+    if (!input.trim() || loading) return
+    const text = input.trim()
+    setInput('')
+    let chatId = activeId
+    let historicoAtual = activeChat ? activeChat.messages : []
+    if (!chatId) {
+      const c = { id: uid(), title: text.slice(0, 30), messages: [], createdAt: Date.now() }
+      setChats(prev => [c, ...prev]); setActiveId(c.id); chatId = c.id
+    }
+    const userMsg = { id: uid(), role: 'user', text, ts: Date.now() }
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.messages.length === 0 ? text.slice(0, 30) : c.title, messages: [...c.messages, userMsg] } : c))
+    setLoading(true)
+    try {
+      const isImage = /imagem|foto|logo|desenho|cria uma|gera uma|ilustra|criar imagem/i.test(text)
+      if (isImage) {
+        const img = await gerarImagemHD(text)
+        const modelMsg = { id: uid(), role: 'model', text: 'Aqui está sua imagem! Toque para ampliar, baixar ou compartilhar.', image: img.url, ts: Date.now() }
+        setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+      } else {
+        const res = await falarComGemini(text, historicoAtual)
+        if (res.error === 'sem-chave') {
+          const modelMsg = { id: uid(), role: 'model', text: '⚠️ Pra eu voltar a conversar, coloca tua chave do Gemini nas Configurações (⚙️). É só 1 vez. Clica no ⚙️ lá em cima > cola a chave > Voltar pro Chat.', ts: Date.now() }
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+        } else {
+          const modelMsg = { id: uid(), role: 'model', text: res.text, ts: Date.now() }
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+        }
+      }
+    } catch (e) {
+      const modelMsg = { id: uid(), role: 'model', text: 'Deu erro no Gemini: ' + e.message + '. Confere se a chave tá certa nas Configurações.', ts: Date.now() }
+      setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight }, [activeChat?.messages?.length, loading])
+
+  return (
+    <div className={`min-h-screen ${theme === 'dark' ? 'bg-[#0b0b0c] text-white' : 'bg-zinc-50 text-black'}`}>
+      <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 bg-[#0b0b0c]/90 backdrop-blur border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-400 to-violet-500 flex items-center justify-center font-black">L</div>
+          <div><p className="font-bold leading-none">LINDOSO IA</p><p className="text-[11px] opacity-60">Online • v3 com Chat</p></div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={newChat} className="px-4 py-2 rounded-full bg-teal-400 text-black font-bold text-sm">+ Novo</button>
+          <button onClick={() => setView(view === 'settings' ? 'chat' : 'settings')} className="px-4 py-2 rounded-full bg-white/10 font-bold text-sm">⚙️</button>
+        </div>
+      </header>
+
+      {view === 'settings' ? (
+        <div className="max-w-xl mx-auto p-4 space-y-4">
+          <h2 className="text-xl font-bold">Configurações</h2>
+          <section className="p-4 rounded-3xl bg-white/5 border border-white/10">
+            <h3 className="font-bold mb-2">🔑 Chave do Gemini - REATIVAR CHAT</h3>
+            <p className="text-sm opacity-70 mb-3">Cole sua chave aqui 1 vez só. Ela fica salva no seu celular.</p>
+            <input value={geminiKey} onChange={e => setGeminiKey(e.target.value.trim())} placeholder="Cole sua chave AIza..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none" />
+            <p className="text-xs opacity-50 mt-2">{geminiKey ? '✅ Chave salva! Pode voltar pro chat.' : '❌ Sem chave - o chat vai pedir pra colocar.'}</p>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="block text-center mt-3 py-3 rounded-2xl bg-white/10 font-bold text-sm">Pegar chave grátis no Google AI Studio</a>
+          </section>
+          <section className="p-4 rounded-3xl bg-white/5 border border-white/10">
+            <h3 className="font-bold mb-3">⚙️ Configuração da IA</h3>
+            <p className="text-sm opacity-70 mb-2">Qualidade da imagem</p>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {['normal','hd','ultra'].map(q => (
+                <button key={q} onClick={() => setImgQ(q)} className={`py-3 rounded-2xl border font-bold text-sm ${imgQ===q ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>{q.toUpperCase()}</button>
+              ))}
+            </div>
+            <p className="text-sm opacity-70 mb-2">Memória</p>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[10,20,50].map(n => (
+                <button key={n} onClick={() => setMemLimit(n)} className={`py-3 rounded-2xl border font-bold text-sm ${memLimit===n ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>{n}</button>
+              ))}
+            </div>
+            <p className="text-sm opacity-70 mb-2">Tema</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setTheme('dark')} className={`py-3 rounded-2xl border font-bold ${theme==='dark' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>🌙 Escuro</button>
+              <button onClick={() => setTheme('light')} className={`py-3 rounded-2xl border font-bold ${theme==='light' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>☀️ Claro</button>
+            </div>
+          </section>
+          <button onClick={() => { localStorage.removeItem('lindoso_chats'); setChats([]); setToast('Histórico limpo!'); setTimeout(()=>setToast(''),2000) }} className="w-full py-3 rounded-2xl bg-red-500/20 text-red-300 font-bold">🗑 Limpar todo histórico</button>
+          <button onClick={() => setView('chat')} className="w-full py-4 rounded-2xl bg-teal-400 text-black font-bold">Voltar pro Chat</button>
+        </div>
+      ) : (
+        <>
+          {chats.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto px-4 py-3">
+              {chats.map(c => (
+                <button key={c.id} onClick={() => { setActiveId(c.id); setView('chat') }} className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium ${c.id===activeId ? 'bg-teal-400 text-black' : 'bg-white/10'}`}>{c.title || 'Conversa'}</button>
+              ))}
+            </div>
+          )}
+          <div ref={scrollRef} className="max-w-2xl mx-auto px-4 pb-32 pt-2 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
+            {!activeChat || activeChat.messages.length === 0 ? (
+              <div className="text-center pt-10">
+                <div className="w-20 h-20 mx-auto rounded-[28px] bg-gradient-to-br from-teal-400 to-violet-500 flex items-center justify-center text-4xl font-black mb-4">L</div>
+                <h1 className="text-2xl font-black">Olá, eu sou o LINDOSO IA</h1>
+                <p className="opacity-60 text-sm mt-2">Peça para criar imagens, logos, textos e muito mais.</p>
+                <div className="grid grid-cols-2 gap-2 mt-6 text-left">
+                  {['🎨 Cria uma logo de pizzaria', '🖼️ Cria uma imagem de praia', '✍️ Me ajuda num texto', '💡 Me dá uma ideia de negócio'].map(s => (
+                    <button key={s} onClick={() => setInput(s.replace(/^[🎨🖼️✍️💡] /,''))} className="p-3 rounded-2xl bg-white/5 border border-white/10 text-sm text-left">{s}</button>
+                  ))}
+                </div>
+              </div>
+            ) : activeChat.messages.map(msg => (
+              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] px-4 py-3 rounded-[22px] shadow-md ${msg.role === 'user' ? 'bg-teal-400 text-black rounded-br-md' : 'bg-[#161617] border border-white/5 rounded-bl-md'}`}>
+                  <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                  {msg.image && (
+                    <div className="mt-3">
+                      <button onClick={() => setLightbox(msg.image)} className="block w-full">
+                        <img src={msg.image} className="rounded-2xl w-full border border-white/10" alt="Imagem gerada" />
+                      </button>
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => setLightbox(msg.image)} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold">🔍 Ampliar</button>
+                        <button onClick={() => downloadImage(msg.image, 'lindoso-imagem.png')} className="flex-1 py-2.5 rounded-xl bg-teal-400 text-black text-xs font-bold">⬇ Baixar</button>
+                        <button onClick={() => shareImage(msg.image, 'Imagem criada no LINDOSO IA')} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold">↗ Compartilhar</button>
+                      </div>
+                      <p className="text-[11px] opacity-50 mt-1">Toque na imagem para ver em tela cheia</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {loading && <p className="text-center text-sm opacity-60 animate-pulse">LINDOSO está pensando...</p>}
+          </div>
+          <div className="fixed bottom-0 left-0 right-0 p-3 bg-[#0b0b0c]/95 backdrop-blur border-t border-white/10">
+            <div className="max-w-2xl mx-auto flex gap-2 items-end">
+              <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="Pergunte ou peça uma imagem..." className="flex-1 bg-white/10 rounded-[22px] px-4 py-3 text-[15px] outline-none resize-none max-h-[120px]" rows={1} />
+              <button onClick={send} className="w-12 h-12 shrink-0 rounded-full bg-teal-400 text-black font-black text-xl">↑</button>
+            </div>
+          </div>
+        </>
+      )}
+      <ImageViewer src={lightbox} onClose={() => setLightbox(null)} onDownload={() => lightbox && downloadImage(lightbox, 'lindoso-imagem.png')} onShare={() => lightbox && shareImage(lightbox, 'Imagem criada no LINDOSO IA')} />
+      {toast && <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-black text-white px-4 py-2 rounded-full text-sm z-[110]">{toast}</div>}
+    </div>
+  )
+}
