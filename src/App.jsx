@@ -116,10 +116,15 @@ async function callModel(apiKey, model, messages) {
       err = new Error('A chave não tem permissão. Gera uma nova no Google AI Studio.')
     else if (res.status === 429)
       err = new Error('Muita mensagem de uma vez (limite do Gemini). Espera um minutinho e manda de novo.')
-    else err = new Error(raw || `Deu erro ${res.status} na API do Gemini.`)
+    else if (res.status === 503 || /high demand|overloaded|try again later/i.test(raw)) {
+      err = new Error('O Gemini tá lotado agora (muita gente usando). Espera um minutinho e manda de novo.')
+      err.busy = true
+    } else err = new Error(raw || `Deu erro ${res.status} na API do Gemini.`)
     // modelo aposentado ou inexistente: o app tenta o próximo da lista
     err.modelGone =
-      res.status === 404 || /no longer available|not found|not supported|deprecated/i.test(raw)
+      !!err.busy ||
+      res.status === 404 ||
+      /no longer available|not found|not supported|deprecated/i.test(raw)
     throw err
   }
 
@@ -139,6 +144,7 @@ async function askGemini(apiKey, messages) {
   const saved = load(LS.model, '')
   const order = saved ? [saved, ...MODELS.filter((m) => m !== saved)] : MODELS
   let lastErr
+  let busyErr
   for (const model of order) {
     try {
       const text = await callModel(apiKey, model, messages)
@@ -146,10 +152,12 @@ async function askGemini(apiKey, messages) {
       return text
     } catch (err) {
       lastErr = err
+      if (err.busy) busyErr = err
       if (!err.modelGone) throw err
     }
   }
-  throw lastErr
+  // se algum modelo estava só lotado, mostra esse aviso (mais útil que o do modelo aposentado)
+  throw busyErr || lastErr
 }
 
 /* ------------------------------------------------------------------ */
