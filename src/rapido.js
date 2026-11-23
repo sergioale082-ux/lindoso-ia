@@ -1,17 +1,20 @@
 /* ------------------------------------------------------------------ */
 /*  LINDOSO IA · Modelo 5: RELÂMPAGO (respostas rápidas)               */
-/*  Groq llama-3.1-8b-instant: o modelo mais rápido e gratuito do Groq */
-/*  (centenas de tokens por segundo, a resposta começa em < 1 s).      */
-/*  Este arquivo também tem o cliente Groq que serve ao Modelo 2       */
-/*  (Llama 70b, reserva do Gemini) e as regras de escolha do modelo.   */
+/*  Groq openai/gpt-oss-20b: o mais rápido e gratuito do Groq (~1000   */
+/*  tokens/s). Este arquivo também tem o cliente Groq do Modelo 2      */
+/*  (openai/gpt-oss-120b, reserva do Gemini) e as regras de escolha.   */
+/*  Se um modelo do Groq sair do ar ("does not exist"), o app pula     */
+/*  sozinho para o próximo da lista, sem mostrar erro ao usuário.      */
 /* ------------------------------------------------------------------ */
 
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 
+// Cada papel tem uma lista: se o 1º não existir mais, o app tenta o próximo.
+// (Os modelos antigos Llama e Qwen foram desativados pelo Groq; estes são os atuais.)
 // Modelo 5 – Relâmpago
-export const MODELO_RELAMPAGO = 'llama-3.1-8b-instant'
+export const MODELOS_RELAMPAGO = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b']
 // Modelo 2 – Reserva (quando o Gemini dá limite 429)
-export const MODELO_RESERVA = 'llama-3.3-70b-versatile'
+export const MODELOS_RESERVA = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']
 
 export const LIMITE_PALAVRAS_RAPIDO = 10
 
@@ -29,7 +32,7 @@ const contaPalavras = (t) => (String(t).trim().match(/\S+/g) || []).length
 
 // pediu para CRIAR uma imagem  -> FLUX
 const IMAGEM_RE =
-  /\b(gera|gere|gerar|cria|crie|criar|faz|faca|fazer|desenha|desenhe|desenhar|monta|monte)\b.{0,40}\b(imagem|imagens|foto|fotos|desenho|ilustracao|logo|logotipo|wallpaper|papel de parede|arte)\b|\b(imagem|foto|desenho|ilustracao) (de|do|da|com)\b/
+  /\b(gera|gere|gerar|cria|crie|criar|faz|faca|fazer|desenha|desenhe|desenhar|monta|monte)\b.{0,40}\b(imagem|imagens|foto|fotos|desenho|ilustracao|logo|logotipo|wallpaper|papel de parede|arte)\b|\b(imagem|foto|desenho|ilustracao) (de|do|da|com)\b|\b(desenha|desenhe|desenhar)\b/
 
 // pediu para CRIAR um arquivo -> DeepSeek
 const ARQUIVO_RE =
@@ -61,7 +64,7 @@ export function mensagemRapida(texto, { temAnexo = false, precisaWeb = false } =
  *  'deepseek'  -> pediu arquivo
  *  'relampago' -> mensagem curta e simples
  *  'gemini'    -> todo o resto (mensagem longa ou complexa)
- * Se o Gemini der limite 429, o app usa o Groq Llama como reserva.
+ * Se o Gemini der limite 429, o app usa o Groq (GPT-OSS 120b) como reserva.
  */
 export function escolherModelo(texto, { temAnexo = false, precisaWeb = false } = {}) {
   if (!temAnexo && pedeImagem(texto)) return 'flux'
@@ -87,25 +90,46 @@ export function paraMensagensGroq(contents, system) {
   return msgs
 }
 
-function erroGroq(status, raw) {
+function erroApi(status, raw, provedor = 'Groq') {
   let err
-  if (status === 401) err = new Error('A chave do Groq não é válida. Cole uma chave nova em Configurações.')
+  const modeloSumiu =
+    status === 404 ||
+    (status >= 400 &&
+      status < 500 &&
+      /does not exist|not exist|do not have access|not found|decommission|deprecated|no longer (?:available|supported)|model_not_found/i.test(
+        raw
+      ))
+  if (modeloSumiu) {
+    err = new Error(`O modelo do ${provedor} não está disponível.`)
+    err.modelGone = true
+  } else if (status === 401) err = new Error(`A chave do ${provedor} não é válida. Cole uma chave nova em Configurações.`)
   else if (status === 429) {
-    err = new Error('Limite de mensagens do Groq atingido. Aguarde um minuto e tente novamente.')
+    err = new Error(`Limite de mensagens do ${provedor} atingido. Aguarde um minuto e tente novamente.`)
     err.rateLimited = true
   } else if (status === 503 || /overloaded|capacity/i.test(raw))
-    err = new Error('O Groq está com muita demanda agora. Aguarde um minuto e tente novamente.')
-  else err = new Error(raw || `Ocorreu o erro ${status} na API do Groq.`)
+    err = new Error(`O ${provedor} está com muita demanda agora. Aguarde um minuto e tente novamente.`)
+  else err = new Error(raw || `Ocorreu o erro ${status} na API do ${provedor}.`)
   err.status = status
   err.api = true
   return err
 }
 
 /** Chama o Groq com streaming. Devolve { text, interrupted }. */
-export async function askGroq({ apiKey, model, messages, onDelta, maxTokens = 1024, temperature = 0.7 }) {
+export async function askGroq({
+  apiKey,
+  model,
+  messages,
+  onDelta,
+  maxTokens = 1024,
+  temperature = 0.7,
+  url = GROQ_URL,
+  provedor = 'Groq',
+  campoMax = 'max_completion_tokens',
+}) {
+  const raciocinio = /gpt-oss/.test(model) ? { reasoning_effort: 'low' } : {}
   let res
   try {
-    res = await fetch(GROQ_URL, {
+    res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
@@ -113,7 +137,8 @@ export async function askGroq({ apiKey, model, messages, onDelta, maxTokens = 10
         messages,
         stream: true,
         temperature,
-        max_tokens: maxTokens,
+        [campoMax]: maxTokens,
+        ...raciocinio, // gpt-oss pensa antes de responder: 'low' = resposta bem mais rápida
       }),
     })
   } catch {
@@ -122,7 +147,7 @@ export async function askGroq({ apiKey, model, messages, onDelta, maxTokens = 10
 
   if (!res.ok) {
     const data = await res.json().catch(() => null)
-    throw erroGroq(res.status, data?.error?.message || '')
+    throw erroApi(res.status, data?.error?.message || '', provedor)
   }
 
   let text = ''
@@ -141,7 +166,7 @@ export async function askGroq({ apiKey, model, messages, onDelta, maxTokens = 10
     } catch {
       return
     }
-    if (json.error) throw erroGroq(json.error.code || 500, json.error.message || '')
+    if (json.error) throw erroApi(json.error.code || 500, json.error.message || '', provedor)
     const piece = json.choices?.[0]?.delta?.content || ''
     if (piece) {
       text += piece
@@ -175,17 +200,50 @@ export async function askGroq({ apiKey, model, messages, onDelta, maxTokens = 10
   return { text, interrupted }
 }
 
+// Tenta cada modelo da lista; se o modelo não existir mais, pula para o próximo.
+// O último que funcionou fica guardado e é tentado primeiro da próxima vez.
+export async function askGroqCadeia({ papel, modelos, ...resto }) {
+  let guardado = ''
+  try {
+    guardado = localStorage.getItem('lindoso_groq_' + papel) || ''
+  } catch {
+    /* sem armazenamento */
+  }
+  const ordem = guardado && modelos.includes(guardado) ? [guardado, ...modelos.filter((m) => m !== guardado)] : modelos
+  let ultimo
+  for (const model of ordem) {
+    try {
+      const r = await askGroq({ ...resto, model })
+      try {
+        localStorage.setItem('lindoso_groq_' + papel, model)
+      } catch {
+        /* sem armazenamento */
+      }
+      return { ...r, model }
+    } catch (err) {
+      ultimo = err
+      if (!err.modelGone) throw err
+    }
+  }
+  const e = new Error('O modelo não está disponível agora.')
+  e.api = true
+  e.groqIndisponivel = true
+  e.cause = ultimo
+  throw e
+}
+
 /* ---------------------------- Modelo 5: Relâmpago ---------------------- */
 
 /** Responde rápido e mede o tempo. Devolve { text, interrupted, segundos, rotulo }. */
 export async function askRelampago({ apiKey, contents, system, onDelta }) {
   const inicio = performance.now()
-  const r = await askGroq({
+  const r = await askGroqCadeia({
+    papel: 'relampago',
+    modelos: MODELOS_RELAMPAGO,
     apiKey,
-    model: MODELO_RELAMPAGO,
     messages: paraMensagensGroq(contents, system),
     onDelta,
-    maxTokens: 512, // respostas curtas = mais rápido
+    maxTokens: 1024, // o gpt-oss gasta parte disso pensando; a resposta continua curta
     temperature: 0.7,
   })
   const segundos = (performance.now() - inicio) / 1000
@@ -195,15 +253,44 @@ export async function askRelampago({ apiKey, contents, system, onDelta }) {
 /** Texto que aparece embaixo da resposta: "Respondido em 0.8s pelo Relâmpago" */
 export const rotuloRelampago = (segundos) => `Respondido em ${segundos.toFixed(1)}s pelo Relâmpago`
 
-/* ------------------------- Modelo 2: Llama 70b (reserva) --------------- */
+/* ------------------------- Modelo 2: GPT-OSS 120b (reserva) ------------ */
 
 export async function askReserva({ apiKey, contents, system, onDelta }) {
-  return askGroq({
+  return askGroqCadeia({
+    papel: 'reserva',
+    modelos: MODELOS_RESERVA,
     apiKey,
-    model: MODELO_RESERVA,
     messages: paraMensagensGroq(contents, system),
     onDelta,
-    maxTokens: 4096,
+    maxTokens: 8192,
     temperature: 0.8,
   })
+}
+
+/* ----------- Ajuda para o FLUX: pedido em português -> prompt em inglês ----------- */
+
+/** Traduz e melhora o pedido de imagem (o FLUX entende inglês bem melhor). Se falhar, devolve o original. */
+export async function melhorarPromptImagem(apiKey, texto) {
+  if (!apiKey) return texto
+  try {
+    const r = await askGroqCadeia({
+      papel: 'relampago',
+      modelos: MODELOS_RELAMPAGO,
+      apiKey,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write prompts for the FLUX image model. Translate the user request to English and add a few vivid visual details (style, lighting, composition). Reply with ONLY the prompt, in one line, max 60 words.',
+        },
+        { role: 'user', content: texto },
+      ],
+      maxTokens: 400,
+      temperature: 0.6,
+    })
+    const t = r.text.replace(/^["'\s]+|["'\s]+$/g, '').replace(/\s+/g, ' ')
+    return t.length > 3 ? t : texto
+  } catch {
+    return texto
+  }
 }
