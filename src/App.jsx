@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import logoUrl from './logo.png'
 import { askRelampago, askReserva, escolherModelo } from './rapido.js'
+import { askDeepSeek } from './deepseek.js'
+import { gerarImagem } from './flux.js'
 
 /* ------------------------------------------------------------------ */
 /*  Configuração                                                       */
@@ -52,20 +54,21 @@ const TRAINING = [
 const SYSTEM_INSTRUCTION = SYSTEM_PROMPT + '\n\n' + TRAINING
 
 // O Google aposenta modelos de tempos em tempos. O app testa na ordem e guarda o que funcionar.
-const MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.0-flash']
+const MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']
 const streamUrl = (model) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`
 
 const ENV_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
 const ENV_GROQ = import.meta.env.VITE_GROQ_API_KEY || ''
+const ENV_DEEPSEEK = import.meta.env.VITE_DEEPSEEK_API_KEY || ''
 
 // Os 5 modelos do LINDOSO IA
 const MODELOS_INFO = [
-  ['1', 'Gemini 3.8', 'Principal'],
-  ['2', 'Groq Llama 70b', 'Reserva'],
-  ['3', 'DeepSeek', 'Arquivos'],
-  ['4', 'FLUX', 'Imagem (único)'],
-  ['5', 'Groq Qwen 8b Instant', 'Relâmpago para respostas rápidas'],
+  ['1', 'Gemini 3.8 Flash', 'Principal'],
+  ['2', 'Groq GPT-OSS 120b', 'Reserva'],
+  ['3', 'DeepSeek V4 Flash', 'Arquivos'],
+  ['4', 'FLUX', 'Imagem (único, sem chave)'],
+  ['5', 'Groq GPT-OSS 20b', 'Relâmpago para respostas rápidas'],
 ]
 
 const LS = {
@@ -75,6 +78,7 @@ const LS = {
   model: 'lindoso_modelo',
   profile: 'lindoso_perfil',
   groqKey: 'lindoso_chave_groq',
+  deepseekKey: 'lindoso_chave_deepseek',
 }
 
 const MAX_CONVS = 20 // conversas lembradas
@@ -410,7 +414,7 @@ async function callModelStream({ apiKey, model, contents, system, web, onDelta }
 // Se a busca na web falhar, repete sem ela e avisa que a informação pode estar desatualizada.
 async function askGemini({ apiKey, contents, system, web, onDelta }) {
   const saved = load(LS.model, '')
-  const order = saved ? [saved, ...MODELS.filter((m) => m !== saved)] : MODELS
+  const order = saved && MODELS.includes(saved) ? [saved, ...MODELS.filter((m) => m !== saved)] : MODELS
   let lastErr
   let busyErr
   let useWeb = web
@@ -1069,6 +1073,17 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
         <div className="text-[15px] leading-relaxed">
           <RichText text={msg.text} streaming={!!msg.streaming} />
         </div>
+        {msg.image && (
+          <img
+            src={msg.image}
+            alt="Imagem criada pelo FLUX"
+            loading="lazy"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+            }}
+            className="mt-2 w-full max-w-[320px] rounded-xl border border-teal-500/30"
+          />
+        )}
         {msg.footer && <div className="mt-1 text-[10px] text-teal-400/80">{msg.footer}</div>}
         {msg.notice && (
           <div className="mt-2 rounded-lg px-2.5 py-1.5 text-xs bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
@@ -1128,11 +1143,56 @@ const Message = memo(function Message({ msg, onOpenSettings, onSpeak, speaking =
 /*  Tela de configurações                                              */
 /* ------------------------------------------------------------------ */
 
-function SettingsScreen({ theme, setTheme, userKey, onSaveKey, groqKey, onSaveGroqKey, name, onSaveName, onClearHistory, onBack }) {
+// cartão de chave de API (Groq, DeepSeek...)
+function KeyCard({ titulo, descricao, link, linkTexto, placeholder, valor, onSalvar, envNome, envAtivo }) {
+  const [draft, setDraft] = useState(valor)
+  const [show, setShow] = useState(false)
+  const [ok, setOk] = useState(false)
+  return (
+    <section className="rounded-2xl bg-white dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 p-4">
+      <h2 className="font-semibold">{titulo}</h2>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 mb-3">
+        {descricao}{' '}
+        <a href={link} target="_blank" rel="noreferrer" className="text-teal-500 underline">
+          {linkTexto}
+        </a>
+        .
+      </p>
+      <div className="flex gap-2">
+        <input
+          type={show ? 'text' : 'password'}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck="false"
+          className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
+        />
+        <button
+          onClick={() => setShow((v) => !v)}
+          className="rounded-xl px-3 text-sm border border-zinc-300 dark:border-white/10"
+        >
+          {show ? 'Ocultar' : 'Ver'}
+        </button>
+      </div>
+      <button
+        onClick={() => {
+          onSalvar(draft.trim())
+          setOk(true)
+          setTimeout(() => setOk(false), 2000)
+        }}
+        className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
+      >
+        {ok ? 'Chave salva!' : 'Salvar chave'}
+      </button>
+      {envAtivo && !valor && <p className="text-xs text-zinc-500 mt-2">Usando a chave do arquivo .env ({envNome}).</p>}
+    </section>
+  )
+}
+
+function SettingsScreen({ theme, setTheme, userKey, onSaveKey, groqKey, onSaveGroqKey, deepseekKey, onSaveDeepseekKey, name, onSaveName, onClearHistory, onBack }) {
   const [draft, setDraft] = useState(userKey)
-  const [groqDraft, setGroqDraft] = useState(groqKey)
-  const [groqShow, setGroqShow] = useState(false)
-  const [groqSaved, setGroqSaved] = useState(false)
   const [nameDraft, setNameDraft] = useState(name)
   const [nameSaved, setNameSaved] = useState(false)
   const [show, setShow] = useState(false)
@@ -1258,53 +1318,29 @@ function SettingsScreen({ theme, setTheme, userKey, onSaveKey, groqKey, onSaveGr
           )}
         </section>
 
-        <section className={card}>
-          <h2 className="font-semibold">Chave da API (Groq)</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 mb-3">
-            Usada pelo Relâmpago (respostas rápidas) e pelo Llama 70b (reserva do Gemini). Fica salva só neste
-            aparelho. Pega uma grátis em{' '}
-            <a
-              href="https://console.groq.com/keys"
-              target="_blank"
-              rel="noreferrer"
-              className="text-teal-500 underline"
-            >
-              console.groq.com/keys
-            </a>
-            .
-          </p>
-          <div className="flex gap-2">
-            <input
-              type={groqShow ? 'text' : 'password'}
-              value={groqDraft}
-              onChange={(e) => setGroqDraft(e.target.value)}
-              placeholder="gsk_..."
-              autoComplete="off"
-              autoCapitalize="off"
-              spellCheck="false"
-              className="flex-1 min-w-0 rounded-xl bg-zinc-100 dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
-            />
-            <button
-              onClick={() => setGroqShow((v) => !v)}
-              className="rounded-xl px-3 text-sm border border-zinc-300 dark:border-white/10"
-            >
-              {groqShow ? 'Ocultar' : 'Ver'}
-            </button>
-          </div>
-          <button
-            onClick={() => {
-              onSaveGroqKey(groqDraft.trim())
-              setGroqSaved(true)
-              setTimeout(() => setGroqSaved(false), 2000)
-            }}
-            className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
-          >
-            {groqSaved ? 'Chave salva!' : 'Salvar chave'}
-          </button>
-          {ENV_GROQ && !groqKey && (
-            <p className="text-xs text-zinc-500 mt-2">Usando a chave do arquivo .env (VITE_GROQ_API_KEY).</p>
-          )}
-        </section>
+        <KeyCard
+          titulo="Chave da API (Groq)"
+          descricao="Usada pelo Relâmpago (respostas rápidas) e pela reserva do Gemini. Fica salva só neste aparelho. Grátis em"
+          link="https://console.groq.com/keys"
+          linkTexto="console.groq.com/keys"
+          placeholder="gsk_..."
+          valor={groqKey}
+          onSalvar={onSaveGroqKey}
+          envNome="VITE_GROQ_API_KEY"
+          envAtivo={!!ENV_GROQ}
+        />
+
+        <KeyCard
+          titulo="Chave da API (DeepSeek)"
+          descricao="Usada para criar arquivos (HTML, PDF, TXT...). É paga, mas muito barata (alguns centavos). Sem a chave, o Gemini cria os arquivos. Pegue em"
+          link="https://platform.deepseek.com/api_keys"
+          linkTexto="platform.deepseek.com"
+          placeholder="sk-..."
+          valor={deepseekKey}
+          onSalvar={onSaveDeepseekKey}
+          envNome="VITE_DEEPSEEK_API_KEY"
+          envAtivo={!!ENV_DEEPSEEK}
+        />
 
         <section className={card}>
           <h2 className="font-semibold mb-2">Os 5 modelos</h2>
@@ -1352,6 +1388,8 @@ export default function App() {
   const [theme, setTheme] = useState(() => load(LS.theme, 'dark'))
   const [userKey, setUserKey] = useState(() => load(LS.key, ''))
   const [groqKey, setGroqKey] = useState(() => load(LS.groqKey, ''))
+  const [deepseekKey, setDeepseekKey] = useState(() => load(LS.deepseekKey, ''))
+  const [loadingImg, setLoadingImg] = useState(false)
   const [profile, setProfile] = useState(() => ({ name: cleanName(load(LS.profile, {})?.name) }))
   const [view, setView] = useState('chat') // 'chat' | 'settings'
   const [sidebar, setSidebar] = useState(false)
@@ -1384,6 +1422,7 @@ export default function App() {
   useEffect(() => save(LS.convs, convs), [convs])
   useEffect(() => save(LS.key, userKey), [userKey])
   useEffect(() => save(LS.groqKey, groqKey), [groqKey])
+  useEffect(() => save(LS.deepseekKey, deepseekKey), [deepseekKey])
   useEffect(() => save(LS.profile, profile), [profile])
   useEffect(() => {
     save(LS.theme, theme)
@@ -1618,6 +1657,7 @@ export default function App() {
 
   const saveKey = (k) => setUserKey(k)
   const saveGroqKey = (k) => setGroqKey(k)
+  const saveDeepseekKey = (k) => setDeepseekKey(k)
   const saveName = (n) => setProfile({ name: cleanName(n) })
 
   const send = async (raw) => {
@@ -1694,13 +1734,15 @@ export default function App() {
       const system = (mode) => buildInstruction({ name, memory, mode })
       const groqAtual = groqKey || ENV_GROQ
 
-      // escolha do modelo: curta e simples -> Relâmpago; longa ou complexa -> Gemini 3.8
-      // (imagem -> FLUX e arquivo -> DeepSeek: seguem no Gemini até esses dois estarem ligados aqui)
+      // escolha do modelo: imagem -> FLUX · arquivo -> DeepSeek · curta e simples -> Relâmpago · resto -> Gemini 3.8
+      const deepAtual = deepseekKey || ENV_DEEPSEEK
       let rota = escolherModelo(text, { temAnexo: files.length > 0, precisaWeb: needsWeb(text) })
-      if (rota === 'flux' || rota === 'deepseek') rota = 'gemini'
+      if (rota === 'deepseek' && !deepAtual) rota = 'gemini' // sem chave do DeepSeek, o Gemini cria o arquivo
       const usaRelampago = rota === 'relampago' && !!groqAtual
+      const usaDeepSeek = rota === 'deepseek'
+      const usaFlux = rota === 'flux'
 
-      if (!apiKey && !usaRelampago) {
+      if (!apiKey && !usaRelampago && !usaDeepSeek && !usaFlux) {
         push({
           id: uid(),
           role: 'model',
@@ -1713,7 +1755,8 @@ export default function App() {
       }
 
       setLoadingId(convId)
-      setLoadingWeb(web && !usaRelampago)
+      setLoadingWeb(web && !usaRelampago && !usaDeepSeek && !usaFlux)
+      setLoadingImg(usaFlux)
       setStreamText('')
 
       // o texto chega aos pedaços; atualiza a tela no máximo 1x por quadro
@@ -1736,6 +1779,23 @@ export default function App() {
       try {
         let r = null
 
+        // Modelo 4 (FLUX): cria a imagem
+        if (usaFlux) {
+          const img = await gerarImagem({ texto: text, groqKey: groqAtual })
+          push({ id: uid(), role: 'model', text: 'Aqui está a sua imagem.', image: img.url, ts: Date.now() })
+          return
+        }
+
+        // Modelo 3 (DeepSeek): cria o arquivo; se falhar, o Gemini assume
+        if (usaDeepSeek) {
+          try {
+            r = await askDeepSeek({ apiKey: deepAtual, contents, system: system('off'), onDelta })
+          } catch {
+            r = null
+            limpaStream()
+          }
+        }
+
         // Modelo 5 (Relâmpago): se falhar por qualquer motivo, o Gemini assume
         if (usaRelampago) {
           try {
@@ -1747,26 +1807,31 @@ export default function App() {
         }
 
         if (!r) {
-          if (!apiKey) throw new Error('O Relâmpago não respondeu e falta a chave do Gemini. Abra Configurações.')
+          if (!apiKey) throw new Error('O modelo escolhido não respondeu e falta a chave do Gemini. Abra Configurações.')
           try {
             r = await askGemini({ apiKey, contents, web, onDelta, system })
           } catch (err) {
-            // Gemini deu limite 429 -> Groq Llama 70b como reserva
+            // Gemini deu limite 429 -> Groq (GPT-OSS 120b) como reserva
             if (err.rateLimited && groqAtual) {
               limpaStream()
-              const g = await askReserva({
-                apiKey: groqAtual,
-                contents,
-                onDelta,
-                system: system(web ? 'failed' : 'off'),
-              })
-              r = { ...g, sources: [], webFailed: web, reserva: true }
+              try {
+                const g = await askReserva({
+                  apiKey: groqAtual,
+                  contents,
+                  onDelta,
+                  system: system(web ? 'failed' : 'off'),
+                })
+                r = { ...g, sources: [], webFailed: web, reserva: true }
+              } catch {
+                limpaStream()
+                throw err // reserva indisponível: mostra só o aviso de limite do Gemini
+              }
             } else throw err
           }
         }
 
         const notices = []
-        if (r.reserva) notices.push('O Gemini atingiu o limite agora. Respondi com o Groq Llama 70b (reserva).')
+        if (r.reserva) notices.push('O Gemini atingiu o limite agora. Respondi com o Groq (reserva).')
         if (r.webFailed && !r.reserva)
           notices.push('Não consegui pesquisar na internet agora. Esta informação pode estar desatualizada.')
         if (r.interrupted) notices.push('A resposta foi interrompida por uma falha de conexão.')
@@ -1787,6 +1852,7 @@ export default function App() {
         setStreamText('')
         setLoadingId(null)
         setLoadingWeb(false)
+        setLoadingImg(false)
       }
     } finally {
       cancelAnimationFrame(raf)
@@ -1926,6 +1992,8 @@ export default function App() {
             onSaveKey={saveKey}
             groqKey={groqKey}
             onSaveGroqKey={saveGroqKey}
+            deepseekKey={deepseekKey}
+            onSaveDeepseekKey={saveDeepseekKey}
             name={profile.name}
             onSaveName={saveName}
             onClearHistory={clearHistory}
@@ -2006,7 +2074,7 @@ export default function App() {
                     />
                   ))}
                   {typing && streamText === '' && (
-                    <Typing label={loadingWeb ? 'Pesquisando na internet...' : undefined} />
+                    <Typing label={loadingImg ? 'Criando a imagem...' : loadingWeb ? 'Pesquisando na internet...' : undefined} />
                   )}
                   {typing && streamText !== '' && (
                     <Message
