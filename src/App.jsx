@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import logoUrl from './logo.png'
 
 /* ------------------------------------------------------------------ */
 /*  Configuração                                                       */
@@ -37,8 +38,10 @@ const TRAINING = [
 
 const SYSTEM_INSTRUCTION = SYSTEM_PROMPT + '\n\n' + TRAINING
 
-const API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+// O Google aposenta modelos de tempos em tempos. O app testa na ordem e guarda o que funcionar.
+const MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.0-flash']
+const apiUrl = (model) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
 
 const ENV_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
 
@@ -47,6 +50,7 @@ const LS = {
   active: 'lindoso_ativa',
   theme: 'lindoso_tema',
   key: 'lindoso_chave',
+  model: 'lindoso_modelo',
 }
 
 const SUGGESTIONS = [
@@ -85,10 +89,10 @@ const fmtDate = (ts) =>
 const fmtTime = (ts) =>
   new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 
-async function askGemini(apiKey, messages) {
+async function callModel(apiKey, model, messages) {
   let res
   try {
-    res = await fetch(API_URL, {
+    res = await fetch(apiUrl(model), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
@@ -105,13 +109,18 @@ async function askGemini(apiKey, messages) {
 
   if (!res.ok) {
     const raw = data?.error?.message || ''
+    let err
     if (res.status === 400 && /api key/i.test(raw))
-      throw new Error('Essa chave da API não tá valendo. Cola uma chave nova em Configurações.')
-    if (res.status === 403)
-      throw new Error('A chave não tem permissão. Gera uma nova no Google AI Studio.')
-    if (res.status === 429)
-      throw new Error('Muita mensagem de uma vez (limite do Gemini). Espera um minutinho e manda de novo.')
-    throw new Error(raw || `Deu erro ${res.status} na API do Gemini.`)
+      err = new Error('Essa chave da API não tá valendo. Cola uma chave nova em Configurações.')
+    else if (res.status === 403)
+      err = new Error('A chave não tem permissão. Gera uma nova no Google AI Studio.')
+    else if (res.status === 429)
+      err = new Error('Muita mensagem de uma vez (limite do Gemini). Espera um minutinho e manda de novo.')
+    else err = new Error(raw || `Deu erro ${res.status} na API do Gemini.`)
+    // modelo aposentado ou inexistente: o app tenta o próximo da lista
+    err.modelGone =
+      res.status === 404 || /no longer available|not found|not supported|deprecated/i.test(raw)
+    throw err
   }
 
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('')
@@ -123,6 +132,24 @@ async function askGemini(apiKey, messages) {
     )
   }
   return text
+}
+
+// Tenta o último modelo que funcionou e, se ele sumir, passa pro próximo da lista
+async function askGemini(apiKey, messages) {
+  const saved = load(LS.model, '')
+  const order = saved ? [saved, ...MODELS.filter((m) => m !== saved)] : MODELS
+  let lastErr
+  for (const model of order) {
+    try {
+      const text = await callModel(apiKey, model, messages)
+      save(LS.model, model)
+      return text
+    } catch (err) {
+      lastErr = err
+      if (!err.modelGone) throw err
+    }
+  }
+  throw lastErr
 }
 
 /* ------------------------------------------------------------------ */
@@ -161,15 +188,18 @@ const Icon = ({ name, className = 'w-5 h-5' }) => (
 /*  Componentes pequenos                                               */
 /* ------------------------------------------------------------------ */
 
-// Logo / avatar: letra "L" em gradiente roxo → azul
+// Logo do LINDOSO IA (imagem src/logo.png)
 function LogoMark({ size = 36 }) {
   return (
-    <div
+    <img
+      src={logoUrl}
+      alt="LINDOSO IA"
+      width={size}
+      height={size}
+      draggable="false"
       style={{ width: size, height: size }}
-      className="shrink-0 rounded-full bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center text-white font-extrabold shadow-lg shadow-violet-900/30 select-none"
-    >
-      <span style={{ fontSize: size * 0.52, lineHeight: 1 }}>L</span>
-    </div>
+      className="shrink-0 rounded-[26%] object-cover shadow-lg shadow-violet-900/40 select-none"
+    />
   )
 }
 
