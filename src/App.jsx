@@ -159,8 +159,7 @@ function buildMemory(convs, activeId) {
   if (!list.length) return ''
   const lines = list.map((c, i) => {
     const last = [...c.messages].reverse().find((m) => m.role === 'user' && m.text)
-    const extra = i < 5 && last ? ` | last user message: "${clip(last.text, 100)}"` : ''
-    return `- ${fmtDate(c.updatedAt)}: ${clip(c.title, 60)}${extra}`
+    const extra = i < 5 && last ? ` | last user message: "${clip(last.text, 100)}"` : '' return `- ${fmtDate(c.updatedAt)}: ${clip(c.title, 60)}${extra}`
   })
   return 'PAST CONVERSATIONS (memory, most recent first):\n' + lines.join('\n')
 }
@@ -254,7 +253,7 @@ function toContents(messages, filesMap) {
       if (data && fresh.has(m.id)) {
         for (const f of data) {
           if (f.kind === 'text')
-            parts.push({ text: `[Início do arquivo: ${f.name}]\n${f.text}\n[Fim do arquivo: ${f.name}]` })
+            parts.push({ text: `[Início do arquivo: ${f.name}]\n${f.text}\n[Fim do arquivo:${f.name}]` })
           else {
             parts.push({ text: `[Arquivo anexado: ${f.name}]` })
             parts.push({ inlineData: { mimeType: f.mime, data: f.data } })
@@ -262,7 +261,7 @@ function toContents(messages, filesMap) {
         }
         if (!text) text = DEFAULT_FILE_PROMPT
       } else {
-        text = `${text}\n[Anexos enviados antes: ${m.files.map((f) => f.name).join(', ')}. O conteúdo não está mais disponível; baseie-se nas respostas anteriores.]`.trim()
+        text = `${text}\n[Anexos enviados antes:${m.files.map((f) => f.name).join(', ')}. O conteúdo não está mais disponível; baseie-se nas respostas anteriores.]`.trim()
       }
     }
     parts.push({ text: text || '...' })
@@ -720,9 +719,75 @@ function buildPdf(markdown) {
   pages.forEach((ops, i) => {
     const stream = ops.join('\n')
     const c = 5 + i * 2
-    objs[c] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream` objs[c + 1] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents${c} 0 R >>`
-    kids.push(`${c + 1} 0 R`) }) objs[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages.length} >>`  let pdf = '\%PDF-1.4\n' const offsets = [] for (let i = 1; i < objs.length; i++) { offsets[i] = pdf.length pdf += `${i} 0 obj\n${objs[i]}\nendobj\n` } const xref = pdf.length pdf += `xref\n0 ${objs.length}\n0000000000 65535 f \n`
-  for (let i = 1; i < objs.length; i++) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n` pdf += `trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n\%\%EOF` return new Blob([pdf], { type: 'application/pdf' }) }  function pdfName(md) { const m = md.match(/^\s*#{1,3}\s+(.+)$/m) const base = (m ? m[1] : 'documento') .normalize('NFD') .replace(/[\u0300-\u036f]/g, '') .replace(/[^\w\s-]/g, '') .trim() .replace(/\s+/g, '-') .slice(0, 50) return (base \vert{}\vert{} 'documento') + '.pdf' }  async function copyText(text) { try { await navigator.clipboard.writeText(text) } catch { const ta = document.createElement('textarea') ta.value = text ta.style.position = 'fixed' ta.style.opacity = '0' document.body.appendChild(ta) ta.select() try { document.execCommand('copy') } catch { /* sem suporte */ } ta.remove() } }  function parseBlocks(text) { const blocks = [] let buf = [] let open = null const flushText = () => { const t = buf.join('\n') if (t.trim()) blocks.push({ type: 'text', text: t }) buf = [] } for (const line of text.split('\n')) { if (!open) { const m = line.match(/^\s*(`{3,})([\w+-]*)\s*$/)
+    objs[c] = '<< /Length ' + stream.length + ' >>\nstream\n' + stream + '\nendstream'
+    objs[c + 1] =
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' +
+      PW +
+      ' ' +
+      PH +
+      '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ' +
+      c +
+      ' 0 R >>'
+    kids.push(`${c + 1} 0 R`)
+  })
+  objs[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages.length} >>`
+
+  let pdf = '%PDF-1.4\n'
+  const offsets = []
+  for (let i = 1; i < objs.length; i++) {
+    offsets[i] = pdf.length
+    pdf += `${i} 0 obj\n${objs[i]}\nendobj\n`
+  }
+  const xref = pdf.length
+  pdf += `xref\n0 ${objs.length}\n0000000000 65535 f \n`
+  for (let i = 1; i < objs.length; i++) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`
+  pdf += `trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+  return new Blob([pdf], { type: 'application/pdf' })
+}
+
+function pdfName(md) {
+  const m = md.match(/^\s*#{1,3}\s+(.+)$/m)
+  const base = (m ? m[1] : 'documento')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .slice(0, 50)
+  return (base || 'documento') + '.pdf'
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } catch {
+      /* sem suporte */
+    }
+    ta.remove()
+  }
+}
+
+function parseBlocks(text) {
+  const blocks = []
+  let buf = []
+  let open = null
+  const flushText = () => {
+    const t = buf.join('\n')
+    if (t.trim()) blocks.push({ type: 'text', text: t })
+    buf = []
+  }
+  for (const line of text.split('\n')) {
+    if (!open) {
+      const m = line.match(/^\s*(`{3,})([\w+-]*)\s*$/)
       if (m) {
         flushText()
         open = { fence: m[1].length, lang: m[2], lines: [] }
@@ -804,4 +869,1470 @@ function NameCard({ onSave }) {
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Seu nome"
           maxLength={40}
-          className="flex-1 min-w-0 rounded-xl bg-white dark:bg-[#000000] text-zinc-900 dark:text-white border border-zinc-300 dark:border-transparent focus:border-teal-500 px-3 py-2.5 text-sm outline-none
+          className="flex-1 min-w-0 rounded-xl bg-white dark:bg-[#000000] text-zinc-900 dark:text-white border border-zinc-300 dark:border-transparent focus:border-teal-500 px-3 py-2.5 text-sm outline-none"
+        />
+        <button
+          onClick={submit}
+          disabled={!v.trim()}
+          className="rounded-xl px-4 text-sm font-medium text-black bg-gradient-to-r from-teal-400 to-cyan-500 disabled:opacity-40"
+        >
+          Salvar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CodeBlock({ lang, code, open = false }) {
+  const [done, setDone] = useState('')
+  const isPrompt = lang.toLowerCase() === 'prompt'
+  const info = fileInfo(lang, code)
+
+  const flash = (k) => {
+    setDone(k)
+    setTimeout(() => setDone(''), 1800)
+  }
+  const onCopy = async () => {
+    await copyText(code)
+    flash('copy')
+  }
+  const onDownload = () => {
+    downloadFile(info.name, info.mime, code)
+    flash('down')
+  }
+
+  if (isPrompt) {
+    return (
+      <div className="rounded-xl overflow-hidden border border-teal-400/40 bg-teal-50 dark:bg-teal-500/10">
+        <div className="px-3 py-1.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
+          Prompt pronto
+        </div>
+        <div className="px-3 pb-3 text-sm text-zinc-900 dark:text-zinc-100 whitespace-pre-wrap break-words max-h-80 overflow-y-auto thin-scroll">
+          {code}
+        </div>
+        <button
+          onClick={onCopy}
+          className="w-full py-2.5 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80"
+        >
+          {done === 'copy' ? 'Copiado!' : 'Copiar prompt'}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl overflow-hidden bg-zinc-900 text-zinc-100 border border-white/10">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-black/40 text-xs text-zinc-400">
+        <span>{lang || info.ext}</span>
+        <span>{info.name}</span>
+      </div>
+      <pre className="overflow-x-auto p-3 text-xs font-mono max-h-96 thin-scroll">
+        <code>{code}</code>
+      </pre>
+      <div className="flex gap-2 p-2 bg-black/30">
+        <button
+          onClick={onDownload}
+          disabled={open}
+          className="flex-1 rounded-lg py-2 text-sm font-semibold text-black bg-gradient-to-r from-teal-400 to-cyan-500 active:opacity-80 disabled:opacity-50"
+        >
+          {open ? 'Gerando...' : done === 'down' ? 'Baixado!' : 'Baixar como arquivo'}
+        </button>
+        <button
+          onClick={onCopy}
+          className="rounded-lg px-4 py-2 text-sm font-medium border border-white/15 hover:bg-white/10"
+        >
+          {done === 'copy' ? 'Copiado!' : 'Copiar'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function TextLines({ text }) {
+  return (
+    <div className="space-y-1.5">
+      {text.split('\n').map((line, j) => {
+        if (line.trim() === '') return <div key={j} className="h-1" />
+        const bullet = line.match(/^\s*[-*]\s+(.*)$/)
+        if (bullet)
+          return (
+            <div key={j} className="flex gap-2 pl-1">
+              <span>•</span>
+              <span>
+                <InlineText text={bullet[1]} />
+              </span>
+            </div>
+          )
+        const head = line.match(/^#{1,3}\s+(.*)$/)
+        if (head)
+          return (
+            <div key={j} className="font-bold">
+              <InlineText text={head[1]} />
+            </div>
+          )
+        return (
+          <div key={j}>
+            <InlineText text={line} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RichText({ text, streaming = false }) {
+  return (
+    <div className="space-y-2 break-words">
+      {parseBlocks(text).map((b, i) =>
+        b.type === 'code' ? (
+          b.lang.toLowerCase() === 'pdf' ? (
+            <PdfCard key={i} code={b.code} open={streaming && !!b.open} />
+          ) : (
+            <CodeBlock key={i} lang={b.lang} code={b.code} open={streaming && !!b.open} />
+          )
+        ) : (
+          <TextLines key={i} text={b.text} />
+        )
+      )}
+    </div>
+  )
+}
+
+const Message = memo(function Message({
+  msg,
+  onOpenSettings,
+  onSpeak,
+  speaking = false,
+  onOpenImage,
+}) {
+  const isUser = msg.role === 'user'
+
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-teal-700 text-white px-4 py-2.5 shadow-sm">
+          {msg.files?.length > 0 && (
+            <div className={`flex flex-wrap gap-1.5 ${msg.text ? 'mb-2' : ''}`}>
+              {msg.files.map((f, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1.5 max-w-full rounded-lg bg-white/15 px-2 py-1 text-xs"
+                >
+                  <Icon name="file" className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate max-w-[200px]">{f.name}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {msg.text && (
+            <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
+              {msg.text}
+            </div>
+          )}
+          <div className="text-[10px] text-teal-100/80 text-right mt-1">{fmtTime(msg.ts)}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-end gap-2 max-w-[94%]">
+      <LogoMark size={30} />
+      <div
+        className={`rounded-2xl rounded-bl-md px-4 py-2.5 shadow-sm min-w-0 max-w-full ${
+          msg.error
+            ? 'bg-red-50 text-red-900 dark:bg-red-950/70 dark:text-red-200 border border-red-300 dark:border-red-500/30'
+            : 'bg-zinc-100 text-zinc-950 border border-zinc-200 dark:bg-[#0a0a0a] dark:text-zinc-100 dark:border-teal-500/25'
+        }`}
+      >
+        {msg.text && (
+          <div className="text-[15px] leading-relaxed">
+            <RichText text={msg.text} streaming={!!msg.streaming} />
+          </div>
+        )}
+        {msg.image && (
+          <button
+            type="button"
+            onClick={() => onOpenImage?.(msg.image)}
+            className="mt-2 block text-left rounded-xl overflow-hidden border border-teal-500/30 focus:outline-none"
+            aria-label="Abrir imagem em tela cheia"
+          >
+            <img
+              src={msg.image}
+              alt="Imagem criada pelo FLUX"
+              loading="lazy"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none'
+              }}
+              className="w-full max-w-[320px] block object-cover"
+            />
+          </button>
+        )}
+        {msg.footer && (
+          <div className="mt-1 text-[10px] text-teal-700 dark:text-teal-400/80">{msg.footer}</div>
+        )}
+        {msg.notice && (
+          <div className="mt-2 rounded-lg px-2.5 py-1.5 text-xs bg-amber-100 text-amber-950 dark:bg-amber-500/15 dark:text-amber-200">
+            {msg.notice}
+          </div>
+        )}
+        {msg.sources?.length > 0 && (
+          <div className="mt-2">
+            <div className="text-[11px] text-zinc-600 dark:text-zinc-400 mb-1">
+              Fontes da pesquisa
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {msg.sources.map((s) => (
+                <a
+                  key={s.uri}
+                  href={s.uri}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="max-w-[200px] truncate rounded-full border border-zinc-300 dark:border-white/15 px-2.5 py-1 text-xs text-teal-700 dark:text-teal-300 hover:bg-teal-500/10"
+                >
+                  {s.title}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+        {msg.action === 'settings' && (
+          <button
+            onClick={onOpenSettings}
+            className="mt-2 rounded-full bg-teal-400 hover:bg-teal-300 text-black text-sm font-medium px-4 py-1.5"
+          >
+            Abrir configurações
+          </button>
+        )}
+        {!msg.streaming && (
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[10px] text-zinc-500 dark:text-zinc-400">{fmtTime(msg.ts)}</span>
+            {canTTS && !msg.error && onSpeak && (
+              <button
+                onClick={() => onSpeak(msg)}
+                className={`-mr-2 p-2 rounded-full hover:bg-teal-500/10 ${
+                  speaking ? 'text-teal-600 dark:text-teal-400' : 'text-zinc-500 hover:text-teal-600'
+                }`}
+                aria-label={speaking ? 'Parar a leitura' : 'Ouvir a resposta'}
+              >
+                <Icon name={speaking ? 'stop' : 'speaker'} className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+})
+
+/* ------------------------------------------------------------------ */
+/*  Modal de imagem em tela cheia (Baixar e Compartilhar)              */
+/* ------------------------------------------------------------------ */
+
+function FullscreenImageModal({ imageUrl, onClose, onNotify }) {
+  const [busy, setBusy] = useState('')
+
+  useEffect(() => {
+    if (!imageUrl) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [imageUrl, onClose])
+
+  if (!imageUrl) return null
+
+  const getBlob = async () => {
+    const res = await fetch(imageUrl)
+    return await res.blob()
+  }
+
+  const handleDownload = async () => {
+    if (busy) return
+    setBusy('down')
+    try {
+      const blob = await getBlob()
+      downloadFile(`lindoso-ia-${Date.now()}.png`, blob.type || 'image/png', blob)
+      onNotify?.('Imagem baixada.')
+    } catch {
+      downloadFile(`lindoso-ia-${Date.now()}.png`, 'image/png', imageUrl)
+      onNotify?.('Download iniciado.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const handleShare = async () => {
+    if (busy) return
+    setBusy('share')
+    try {
+      const blob = await getBlob()
+      const file = new File([blob], 'lindoso-ia.png', { type: blob.type || 'image/png' })
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: 'LINDOSO IA',
+          files: [file],
+        })
+        onNotify?.('Imagem compartilhada.')
+      } else if (navigator.share) {
+        await navigator.share({
+          title: 'LINDOSO IA',
+          url: imageUrl,
+        })
+      } else {
+        await copyText(imageUrl)
+        onNotify?.('Link copiado para compartilhar.')
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        await copyText(imageUrl)
+        onNotify?.('Link copiado.')
+      }
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Visualização da imagem"
+    >
+      <div
+        className="flex items-center justify-between px-4 pb-3 bg-black/80 border-b border-white/10"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-2.5 rounded-full text-white hover:bg-white/10"
+          aria-label="Fechar"
+        >
+          <Icon name="x" />
+        </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={!!busy}
+            className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium bg-white/10 text-white hover:bg-white/20 disabled:opacity-50"
+            aria-label="Baixar imagem"
+          >
+            <Icon name="download" className="w-4 h-4" />
+            <span>{busy === 'down' ? 'Baixando...' : 'Baixar'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleShare}
+            disabled={!!busy}
+            className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium bg-teal-400 text-black hover:bg-teal-300 disabled:opacity-50"
+            aria-label="Compartilhar imagem"
+          >
+            <Icon name="share" className="w-4 h-4" />
+            <span>{busy === 'share' ? 'Enviando...' : 'Compartilhar'}</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 flex items-center justify-center p-4" onClick={onClose}>
+        <img
+          src={imageUrl}
+          alt="Imagem em tela cheia"
+          onClick={(e) => e.stopPropagation()}
+          className="max-h-full max-w-full object-contain rounded-lg select-none"
+        />
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tela de configurações                                              */
+/* ------------------------------------------------------------------ */
+
+function KeyCard({ titulo, descricao, link, linkTexto, placeholder, valor, onSalvar, envNome, envAtivo }) {
+  const [draft, setDraft] = useState(valor)
+  const [show, setShow] = useState(false)
+  const [ok, setOk] = useState(false)
+  return (
+    <section className="rounded-2xl bg-zinc-50 dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 p-4">
+      <h2 className="font-semibold">{titulo}</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1 mb-3">
+        {descricao}{' '}
+        <a href={link} target="_blank" rel="noreferrer" className="text-teal-600 dark:text-teal-400 underline">
+          {linkTexto}
+        </a>
+        .
+      </p>
+      <div className="flex gap-2">
+        <input
+          type={show ? 'text' : 'password'}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck="false"
+          className="flex-1 min-w-0 rounded-xl bg-white dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
+        />
+        <button
+          type="button"
+          onClick={() => setShow((v) => !v)}
+          className="rounded-xl px-3 text-sm border border-zinc-300 dark:border-white/10"
+        >
+          {show ? 'Ocultar' : 'Ver'}
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          onSalvar(draft.trim())
+          setOk(true)
+          setTimeout(() => setOk(false), 2000)
+        }}
+        className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
+      >
+        {ok ? 'Chave salva!' : 'Salvar chave'}
+      </button>
+      {envAtivo && !valor && (
+        <p className="text-xs text-zinc-500 mt-2">Usando a chave do arquivo .env ({envNome}).</p>
+      )}
+    </section>
+  )
+}
+
+function SettingsScreen({
+  theme,
+  setTheme,
+  userKey,
+  onSaveKey,
+  groqKey,
+  onSaveGroqKey,
+  deepseekKey,
+  onSaveDeepseekKey,
+  name,
+  onSaveName,
+  onClearHistory,
+  onBack,
+}) {
+  const [draft, setDraft] = useState(userKey)
+  const [nameDraft, setNameDraft] = useState(name)
+  const [nameSaved, setNameSaved] = useState(false)
+  const [show, setShow] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const handleSave = () => {
+    onSaveKey(draft.trim())
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const card =
+    'rounded-2xl bg-zinc-50 dark:bg-[#0a0a0a] border border-zinc-200 dark:border-teal-500/20 p-4'
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <header
+        className="flex items-center gap-3 px-3 pb-3 bg-white dark:bg-[#000000] border-b border-zinc-200 dark:border-teal-500/20"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}
+      >
+        <button
+          type="button"
+          onClick={onBack}
+          className="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10"
+          aria-label="Voltar"
+        >
+          <Icon name="back" />
+        </button>
+        <h1 className="text-lg font-semibold">Configurações</h1>
+      </header>
+
+      <div className="flex-1 overflow-y-auto thin-scroll p-4 space-y-4 bg-white dark:bg-[#000000]">
+        <section className={card}>
+          <h2 className="font-semibold mb-3">Tema</h2>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              ['dark', 'Escuro', 'moon'],
+              ['light', 'Claro', 'sun'],
+            ].map(([val, label, icon]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setTheme(val)}
+                className={`flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-medium border transition-colors ${
+                  theme === val
+                    ? 'bg-teal-400 text-black border-teal-400'
+                    : 'border-zinc-300 dark:border-white/10 hover:bg-zinc-100 dark:hover:bg-white/5'
+                }`}
+              >
+                <Icon name={icon} className="w-4 h-4" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className={card}>
+          <h2 className="font-semibold">Memória</h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1 mb-3">
+            O LINDOSO IA lembra do seu nome e das últimas 20 conversas. Tudo fica salvo apenas neste
+            aparelho.
+          </p>
+          <input
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            placeholder="Seu nome"
+            maxLength={40}
+            autoComplete="off"
+            className="w-full rounded-xl bg-white dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              onSaveName(nameDraft)
+              setNameSaved(true)
+              setTimeout(() => setNameSaved(false), 2000)
+            }}
+            className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
+          >
+            {nameSaved ? 'Nome salvo!' : 'Salvar nome'}
+          </button>
+        </section>
+
+        <div className="pt-2">
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-3 px-1">
+            Chaves da IA
+          </div>
+          <div className="space-y-4">
+            <section className={card}>
+              <h2 className="font-semibold">Chave da API (Google Gemini)</h2>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1 mb-3">
+                Cola aqui a tua chave. Ela fica salva só neste aparelho. Pega uma grátis em{' '}
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-teal-600 dark:text-teal-400 underline"
+                >
+                  aistudio.google.com/apikey
+                </a>
+                .
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type={show ? 'text' : 'password'}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="AIza..."
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck="false"
+                  className="flex-1 min-w-0 rounded-xl bg-white dark:bg-[#000000] border border-zinc-300 dark:border-white/10 px-3 py-2.5 text-sm outline-none focus:border-teal-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow((s) => !s)}
+                  className="rounded-xl px-3 text-sm border border-zinc-300 dark:border-white/10"
+                >
+                  {show ? 'Ocultar' : 'Ver'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={handleSave}
+                className="mt-3 w-full rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3"
+              >
+                {saved ? 'Chave salva!' : 'Salvar chave'}
+              </button>
+              {ENV_KEY && !userKey && (
+                <p className="text-xs text-zinc-500 mt-2">
+                  Usando a chave do arquivo .env (VITE_GEMINI_API_KEY).
+                </p>
+              )}
+            </section>
+
+            <KeyCard
+              titulo="Chave da API (Groq)"
+              descricao="Usada pelo Relâmpago (respostas rápidas) e pela reserva do Gemini. Fica salva só neste aparelho. Grátis em"
+              link="https://console.groq.com/keys"
+              linkTexto="console.groq.com/keys"
+              placeholder="gsk_..."
+              valor={groqKey}
+              onSalvar={onSaveGroqKey}
+              envNome="VITE_GROQ_API_KEY"
+              envAtivo={!!ENV_GROQ}
+            />
+
+            <KeyCard
+              titulo="Chave da API (DeepSeek)"
+              descricao="Usada para criar arquivos (HTML, PDF, TXT...). É paga, mas muito barata. Sem a chave, o Gemini cria os arquivos. Pegue em"
+              link="https://platform.deepseek.com/api_keys"
+              linkTexto="platform.deepseek.com"
+              placeholder="sk-..."
+              valor={deepseekKey}
+              onSalvar={onSaveDeepseekKey}
+              envNome="VITE_DEEPSEEK_API_KEY"
+              envAtivo={!!ENV_DEEPSEEK}
+            />
+          </div>
+        </div>
+
+        <section className={card}>
+          <h2 className="font-semibold mb-2">Modelos</h2>
+          <ul className="space-y-1.5 text-sm">
+            {MODELOS_INFO.map(([n, nome, papel]) => (
+              <li key={n} className="flex gap-2">
+                <span className="text-teal-600 dark:text-teal-400 font-semibold">{n}.</span>
+                <span>
+                  {nome} <span className="text-zinc-600 dark:text-zinc-400">· {papel}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <div className="pt-4 mt-2 border-t border-zinc-200 dark:border-white/10">
+          <section className="rounded-2xl bg-red-50/70 dark:bg-red-950/20 border border-red-300 dark:border-red-500/30 p-4">
+            <h2 className="font-semibold text-red-700 dark:text-red-400">Limpar histórico</h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1 mb-3">
+              Apaga todas as conversas deste aparelho. Não dá pra desfazer.
+            </p>
+            <button
+              type="button"
+              onClick={onClearHistory}
+              className="w-full rounded-xl border border-red-500 text-red-600 dark:text-red-400 font-medium py-3 hover:bg-red-500/10"
+            >
+              Limpar todo histórico
+            </button>
+          </section>
+        </div>
+
+        <p className="text-center text-xs text-zinc-500 pb-6">
+          LINDOSO IA · Teu parceiro de Belém
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  App principal                                                      */
+/* ------------------------------------------------------------------ */
+
+export default function App() {
+  const [convs, setConvs] = useState(() => trimConvs(load(LS.convs, [])))
+  const [activeId, setActiveId] = useState(null)
+  const [theme, setTheme] = useState(() => load(LS.theme, 'dark'))
+  const [userKey, setUserKey] = useState(() => load(LS.key, ''))
+  const [groqKey, setGroqKey] = useState(() => load(LS.groqKey, ''))
+  const [deepseekKey, setDeepseekKey] = useState(() => load(LS.deepseekKey, ''))
+  const [loadingImg, setLoadingImg] = useState(false)
+  const [profile, setProfile] = useState(() => ({ name: cleanName(load(LS.profile, {})?.name) }))
+  const [view, setView] = useState('chat')
+  const [sidebar, setSidebar] = useState(false)
+  const [query, setQuery] = useState('')
+  const [input, setInput] = useState('')
+  const [loadingId, setLoadingId] = useState(null)
+  const [loadingWeb, setLoadingWeb] = useState(false)
+  const [streamText, setStreamText] = useState('')
+  const [pending, setPending] = useState([])
+  const [listening, setListening] = useState(false)
+  const [speakingId, setSpeakingId] = useState(null)
+  const [fullscreenImg, setFullscreenImg] = useState('')
+  const [toast, setToast] = useState('')
+
+  const endRef = useRef(null)
+  const taRef = useRef(null)
+  const scrollRef = useRef(null)
+  const fileRef = useRef(null)
+  const recRef = useRef(null)
+  const toastTimer = useRef(null)
+  const speechToken = useRef(0)
+  const speakingRef = useRef(null)
+  const sendingRef = useRef(false)
+  const filesRef = useRef(null)
+  if (filesRef.current === null) filesRef.current = new Map()
+
+  const current = convs.find((c) => c.id === activeId) || null
+  const apiKey = userKey || ENV_KEY
+
+  useEffect(() => save(LS.convs, convs), [convs])
+  useEffect(() => save(LS.key, userKey), [userKey])
+  useEffect(() => save(LS.groqKey, groqKey), [groqKey])
+  useEffect(() => save(LS.deepseekKey, deepseekKey), [deepseekKey])
+  useEffect(() => save(LS.profile, profile), [profile])
+  useEffect(() => {
+    save(LS.theme, theme)
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff')
+  }, [theme])
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [current?.messages.length, loadingId, activeId, view])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight
+  }, [streamText])
+
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'
+  }, [input])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const sorted = [...convs].sort((a, b) => b.updatedAt - a.updatedAt)
+    if (!q) return sorted
+    return sorted.filter(
+      (c) =>
+        c.title.toLowerCase().includes(q) ||
+        c.messages.some((m) => m.text.toLowerCase().includes(q))
+    )
+  }, [convs, query])
+
+  const lastConv = useMemo(
+    () =>
+      [...convs]
+        .filter((c) => c.messages.length)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0] || null,
+    [convs]
+  )
+
+  const showToast = useCallback((msg) => {
+    setToast(msg)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(''), 3500)
+  }, [])
+
+  const openSettings = useCallback(() => setView('settings'), [])
+
+  const stopSpeech = useCallback(() => {
+    if (!canTTS) return
+    speechToken.current += 1
+    window.speechSynthesis.cancel()
+    speakingRef.current = null
+    setSpeakingId(null)
+  }, [])
+
+  const toggleSpeak = useCallback(
+    (msg) => {
+      if (!canTTS) return
+      const was = speakingRef.current
+      stopSpeech()
+      if (was === msg.id) return
+      const chunks = chunkSpeech(speechText(msg.text))
+      if (!chunks.length) return
+      const token = speechToken.current
+      const voice = pickVoice()
+      speakingRef.current = msg.id
+      setSpeakingId(msg.id)
+      chunks.forEach((c, i) => {
+        const u = new SpeechSynthesisUtterance(c)
+        u.lang = 'pt-BR'
+        if (voice) u.voice = voice
+        u.onend = () => {
+          if (speechToken.current === token && i === chunks.length - 1) {
+            speakingRef.current = null
+            setSpeakingId(null)
+          }
+        }
+        u.onerror = () => {
+          if (speechToken.current === token) {
+            speakingRef.current = null
+            setSpeakingId(null)
+          }
+        }
+        window.speechSynthesis.speak(u)
+      })
+    },
+    [stopSpeech]
+  )
+
+  useEffect(() => {
+    stopSpeech()
+  }, [activeId, stopSpeech])
+  useEffect(
+    () => () => {
+      if (canTTS) window.speechSynthesis.cancel()
+      recRef.current?.abort?.()
+    },
+    []
+  )
+
+  const toggleMic = () => {
+    if (!SR) {
+      showToast('Seu navegador não permite ditado por voz. Use o Chrome, Edge ou Safari.')
+      return
+    }
+    if (recRef.current) {
+      recRef.current.stop()
+      return
+    }
+    stopSpeech()
+    const rec = new SR()
+    rec.lang = 'pt-BR'
+    rec.interimResults = true
+    rec.continuous = false
+    const base = input.trim() ? input.trimEnd() + ' ' : ''
+    rec.onresult = (e) => {
+      let t = ''
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript
+      setInput(base + t)
+    }
+    rec.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
+        showToast('Permissão do microfone negada. Libere o acesso nas configurações do navegador.')
+      else if (e.error === 'no-speech') showToast('Não consegui ouvir nada. Tente falar novamente.')
+      else if (e.error !== 'aborted') showToast('Não foi possível usar o microfone agora.')
+    }
+    rec.onend = () => {
+      recRef.current = null
+      setListening(false)
+    }
+    recRef.current = rec
+    setListening(true)
+    try {
+      rec.start()
+    } catch {
+      recRef.current = null
+      setListening(false)
+    }
+  }
+
+  const clearPending = () => {
+    pending.forEach((p) => p.preview && URL.revokeObjectURL(p.preview))
+    setPending([])
+  }
+
+  const removePending = (id) =>
+    setPending((p) => {
+      const x = p.find((i) => i.id === id)
+      if (x?.preview) URL.revokeObjectURL(x.preview)
+      return p.filter((i) => i.id !== id)
+    })
+
+  const onPickFiles = (e) => {
+    const list = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (!list.length) return
+    const next = [...pending]
+    for (const f of list) {
+      const kind = fileKind(f)
+      if (!kind) {
+        showToast(`"${f.name}" não é compatível. Envie imagem (PNG, JPG, WEBP), PDF ou texto.`)
+        continue
+      }
+      if (f.size > MAX_FILE) {
+        showToast(`"${f.name}" passa de 10 MB.`)
+        continue
+      }
+      if (next.length >= MAX_FILES) {
+        showToast(`Máximo de ${MAX_FILES} arquivos por mensagem.`)
+        break
+      }
+      if (next.reduce((s, p) => s + p.file.size, 0) + f.size > MAX_TOTAL) {
+        showToast('Os anexos passam de 12 MB no total.')
+        continue
+      }
+      next.push({
+        id: uid(),
+        file: f,
+        kind,
+        preview: kind === 'image' ? URL.createObjectURL(f) : '',
+      })
+    }
+    setPending(next)
+  }
+
+  const newChat = () => {
+    setActiveId(null)
+    setView('chat')
+    setSidebar(false)
+    setInput('')
+    clearPending()
+    stopSpeech()
+    setTimeout(() => taRef.current?.focus(), 50)
+  }
+
+  const openConv = (id) => {
+    setActiveId(id)
+    setView('chat')
+    setSidebar(false)
+  }
+
+  const deleteConv = (id) => {
+    if (!window.confirm('Excluir essa conversa?')) return
+    convs.find((c) => c.id === id)?.messages.forEach((m) => filesRef.current.delete(m.id))
+    setConvs((p) => p.filter((c) => c.id !== id))
+    if (id === activeId) setActiveId(null)
+  }
+
+  const clearHistory = () => {
+    if (!window.confirm('Apagar TODAS as conversas? Não dá pra desfazer.')) return
+    filesRef.current.clear()
+    setConvs([])
+    setActiveId(null)
+    setView('chat')
+  }
+
+  const saveKey = (k) => setUserKey(k)
+  const saveGroqKey = (k) => setGroqKey(k)
+  const saveDeepseekKey = (k) => setDeepseekKey(k)
+  const saveName = (n) => setProfile({ name: cleanName(n) })
+
+  const send = async (raw) => {
+    const text = (raw ?? input).trim()
+    const items = raw === undefined ? pending : []
+    if ((!text && items.length === 0) || loadingId || sendingRef.current) return
+
+    sendingRef.current = true
+    let raf = 0
+    try {
+      recRef.current?.stop()
+      stopSpeech()
+
+      let files = []
+      if (items.length) {
+        try {
+          files = await prepareFiles(items)
+        } catch {
+          showToast('Não foi possível ler o arquivo. Tente anexar novamente.')
+          return
+        }
+      }
+
+      const now = Date.now()
+      const userMsg = { id: uid(), role: 'user', text, ts: now }
+      if (files.length) {
+        userMsg.files = files.map(({ name, size, kind, mime }) => ({ name, size, kind, mime }))
+        filesRef.current.set(userMsg.id, files)
+      }
+
+      const detected = detectName(text)
+      if (detected && detected !== profile.name) setProfile({ name: detected })
+      const name = detected || profile.name
+
+      let convId = activeId
+      let history
+
+      if (!current) {
+        convId = uid()
+        const title = text
+          ? text.length > 40
+            ? text.slice(0, 40) + '…'
+            : text
+          : clip(files[0].name, 40)
+        setConvs((p) =>
+          trimConvs([{ id: convId, title, messages: [userMsg], createdAt: now, updatedAt: now }, ...p])
+        )
+        setActiveId(convId)
+        history = [userMsg]
+      } else {
+        history = [...current.messages.filter((m) => !m.error), userMsg]
+        setConvs((p) =>
+          p.map((c) =>
+            c.id === convId ? { ...c, messages: [...c.messages, userMsg], updatedAt: now } : c
+          )
+        )
+      }
+
+      setInput('')
+      clearPending()
+      setView('chat')
+
+      const push = (msg) =>
+        setConvs((p) =>
+          p.map((c) =>
+            c.id === convId ? { ...c, messages: [...c.messages, msg], updatedAt: Date.now() } : c
+          )
+        )
+
+      const web = files.length === 0 && needsWeb(text)
+      const memory = buildMemory(convs, convId)
+      const contents = toContents(history, filesRef.current)
+      const system = (mode) => buildInstruction({ name, memory, mode })
+      const groqAtual = groqKey || ENV_GROQ
+
+      const deepAtual = deepseekKey || ENV_DEEPSEEK
+      let rota = escolherModelo(text, { temAnexo: files.length > 0, precisaWeb: needsWeb(text) })
+      if (rota === 'deepseek' && !deepAtual) rota = 'gemini'
+      const usaRelampago = rota === 'relampago' && !!groqAtual
+      const usaDeepSeek = rota === 'deepseek'
+      const usaFlux = rota === 'flux'
+
+      if (!apiKey && !usaRelampago && !usaDeepSeek && !usaFlux) {
+        push({
+          id: uid(),
+          role: 'model',
+          ts: Date.now(),
+          error: true,
+          action: 'settings',
+          text: 'Ainda falta a chave da API do Gemini. Abra Configurações e cole a chave. Ela é gratuita.',
+        })
+        return
+      }
+
+      setLoadingId(convId)
+      setLoadingWeb(web && !usaRelampago && !usaDeepSeek && !usaFlux)
+      setLoadingImg(usaFlux)
+      setStreamText('')
+
+      let latest = ''
+      const onDelta = (t) => {
+        latest = t
+        if (!raf)
+          raf = requestAnimationFrame(() => {
+            raf = 0
+            setStreamText(latest)
+          })
+      }
+      const limpaStream = () => {
+        cancelAnimationFrame(raf)
+        raf = 0
+        latest = ''
+        setStreamText('')
+      }
+
+      try {
+        let r = null
+
+        if (usaFlux) {
+          const img = await gerarImagem({ texto: text, groqKey: groqAtual })
+          push({ id: uid(), role: 'model', text: 'Aqui está a sua imagem.', image: img.url, ts: Date.now() })
+          return
+        }
+
+        if (usaDeepSeek) {
+          try {
+            r = await askDeepSeek({ apiKey: deepAtual, contents, system: system('off'), onDelta })
+          } catch {
+            r = null
+            limpaStream()
+          }
+        }
+
+        if (usaRelampago) {
+          try {
+            r = await askRelampago({ apiKey: groqAtual, contents, system: system('off'), onDelta })
+          } catch {
+            r = null
+            limpaStream()
+          }
+        }
+
+        if (!r) {
+          if (!apiKey)
+            throw new Error(
+              'O modelo escolhido não respondeu e falta a chave do Gemini. Abra Configurações.'
+            )
+          try {
+            r = await askGemini({ apiKey, contents, web, onDelta, system })
+          } catch (err) {
+            if (err.rateLimited && groqAtual) {
+              limpaStream()
+              try {
+                const g = await askReserva({
+                  apiKey: groqAtual,
+                  contents,
+                  onDelta,
+                  system: system(web ? 'failed' : 'off'),
+                })
+                r = { ...g, sources: [], webFailed: web, reserva: true }
+              } catch {
+                limpaStream()
+                throw err
+              }
+            } else throw err
+          }
+        }
+
+        const notices = []
+        if (r.reserva) notices.push('O Gemini atingiu o limite agora. Respondi com o Groq (reserva).')
+        if (r.webFailed && !r.reserva)
+          notices.push('Não consegui pesquisar na internet agora. Esta informação pode estar desatualizada.')
+        if (r.interrupted) notices.push('A resposta foi interrompida por uma falha de conexão.')
+        push({
+          id: uid(),
+          role: 'model',
+          text: r.text,
+          ts: Date.now(),
+          ...(r.sources?.length ? { sources: r.sources.slice(0, 6) } : {}),
+          ...(notices.length ? { notice: notices.join(' ') } : {}),
+          ...(r.rotulo ? { footer: r.rotulo } : {}),
+        })
+      } catch (err) {
+        push({ id: uid(), role: 'model', text: err.message, ts: Date.now(), error: true })
+      } finally {
+        cancelAnimationFrame(raf)
+        raf = 0
+        setStreamText('')
+        setLoadingId(null)
+        setLoadingWeb(false)
+        setLoadingImg(false)
+      }
+    } finally {
+      cancelAnimationFrame(raf)
+      sendingRef.current = false
+    }
+  }
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      send()
+    }
+  }
+
+  const typing = loadingId !== null && loadingId === activeId
+
+  const subtitle = profile.name
+    ? lastConv
+      ? `Da última vez conversamos sobre “${lastConv.title}”.`
+      : 'Em que posso ajudar hoje?'
+    : 'Teu parceiro de Belém'
+
+  return (
+    <div className="h-[100dvh] flex bg-white dark:bg-[#000000] text-zinc-950 dark:text-zinc-100 overflow-hidden">
+      {sidebar && (
+        <div className="fixed inset-0 bg-black/60 z-30 md:hidden" onClick={() => setSidebar(false)} />
+      )}
+
+      <aside
+        className={`fixed md:static inset-y-0 left-0 z-40 w-[85%] max-w-sm md:w-80 md:max-w-none flex flex-col bg-white dark:bg-[#000000] border-r border-zinc-200 dark:border-teal-500/20 transition-transform duration-200 ${
+          sidebar ? 'translate-x-0' : '-translate-x-full'
+        } md:translate-x-0`}
+      >
+        <div
+          className="flex items-center gap-3 px-4 pb-3"
+          style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}
+        >
+          <LogoMark size={38} />
+          <div className="flex-1 min-w-0">
+            <div className="font-bold leading-tight">LINDOSO IA</div>
+            <div className="text-xs text-zinc-600 dark:text-zinc-400">Teu parceiro de Belém</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSidebar(false)}
+            className="md:hidden p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10"
+            aria-label="Fechar menu"
+          >
+            <Icon name="x" />
+          </button>
+        </div>
+
+        <div className="px-4 space-y-3">
+          <button
+            type="button"
+            onClick={newChat}
+            className="w-full flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-teal-400 to-cyan-500 text-black font-medium py-3 shadow-lg shadow-teal-900/20 active:scale-[0.98] transition-transform"
+          >
+            <Icon name="plus" className="w-5 h-5" />
+            Nova conversa
+          </button>
+
+          <div className="relative">
+            <Icon
+              name="search"
+              className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar conversas"
+              className="w-full rounded-full bg-zinc-100 dark:bg-[#111111] pl-9 pr-3 py-2.5 text-sm outline-none border border-transparent focus:border-teal-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto thin-scroll mt-3 px-2 pb-2">
+          {filtered.length === 0 && (
+            <p className="text-center text-sm text-zinc-500 mt-10 px-6">
+              {convs.length === 0
+                ? 'Nenhuma conversa ainda. Envie uma mensagem para começar.'
+                : 'Nada encontrado com essa busca.'}
+            </p>
+          )}
+          {filtered.map((c) => (
+            <div
+              key={c.id}
+              className={`group flex items-center gap-1 rounded-xl pl-3 pr-1 mb-1 ${
+                c.id === activeId
+                  ? 'bg-teal-100/80 dark:bg-teal-500/15'
+                  : 'hover:bg-zinc-100 dark:hover:bg-white/5'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => openConv(c.id)}
+                className="flex-1 min-w-0 text-left py-3"
+              >
+                <div className="truncate text-sm font-medium">{c.title}</div>
+                <div className="text-xs text-zinc-500">{fmtDate(c.updatedAt)}</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteConv(c.id)}
+                className="p-2.5 rounded-full text-zinc-400 hover:text-red-500 hover:bg-red-500/10"
+                aria-label="Excluir conversa"
+              >
+                <Icon name="trash" className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div
+          className="p-3 border-t border-zinc-200 dark:border-teal-500/20"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setView('settings')
+              setSidebar(false)
+            }}
+            className="w-full flex items-center gap-3 rounded-xl px-3 py-3 hover:bg-zinc-100 dark:hover:bg-white/5 text-sm font-medium"
+          >
+            <Icon name="sliders" />
+            Configurações
+          </button>
+        </div>
+      </aside>
+
+      <main className="flex-1 min-w-0 flex flex-col">
+        {view === 'settings' ? (
+          <SettingsScreen
+            theme={theme}
+            setTheme={setTheme}
+            userKey={userKey}
+            onSaveKey={saveKey}
+            groqKey={groqKey}
+            onSaveGroqKey={saveGroqKey}
+            deepseekKey={deepseekKey}
+            onSaveDeepseekKey={saveDeepseekKey}
+            name={profile.name}
+            onSaveName={saveName}
+            onClearHistory={clearHistory}
+            onBack={() => setView('chat')}
+          />
+        ) : (
+          <>
+            <header
+              className="flex items-center gap-3 px-3 pb-3 bg-white dark:bg-[#000000] border-b border-zinc-200 dark:border-teal-500/20"
+              style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}
+            >
+              <button
+                type="button"
+                onClick={() => setSidebar(true)}
+                className="md:hidden p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10"
+                aria-label="Abrir menu"
+              >
+                <Icon name="menu" />
+              </button>
+              <LogoMark size={38} />
+              <div className="flex-1 min-w-0">
+                <div className="font-bold leading-tight truncate">LINDOSO IA</div>
+                <div className="text-xs text-emerald-600 dark:text-emerald-400 truncate">
+                  {typing
+                    ? loadingWeb
+                      ? 'pesquisando na internet...'
+                      : 'digitando...'
+                    : 'Teu parceiro de Belém'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setView('settings')}
+                className="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10"
+                aria-label="Configurações"
+              >
+                <Icon name="sliders" />
+              </button>
+            </header>
+
+            <div
+              ref={scrollRef}
+              className="flex-1 overflow-y-auto thin-scroll px-3 py-4 bg-white dark:bg-[#000000]"
+            >
+              {!current || current.messages.length === 0 ? (
+                <div className="min-h-full flex flex-col items-center justify-center text-center px-4">
+                  <LogoMark size={84} />
+                  <h2 className="mt-5 text-2xl font-extrabold bg-gradient-to-r from-teal-500 to-cyan-500 dark:from-teal-300 dark:to-cyan-400 bg-clip-text text-transparent">
+                    {profile.name ? `${greeting()}, ${profile.name}!` : 'LINDOSO IA'}
+                  </h2>
+                  <p className="text-zinc-600 dark:text-zinc-400 mt-1">{subtitle}</p>
+                  {lastConv && (
+                    <button
+                      type="button"
+                      onClick={() => openConv(lastConv.id)}
+                      className="mt-4 rounded-full border border-teal-500/50 text-teal-700 dark:text-teal-300 px-4 py-2 text-sm font-medium hover:bg-teal-500/10 active:scale-[0.98] transition"
+                    >
+                      Continuar a conversa anterior
+                    </button>
+                  )}
+                  {!profile.name && <NameCard onSave={saveName} />}
+                  <div className="mt-8 w-full max-w-md space-y-2">
+                    {SUGGESTIONS.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => send(s)}
+                        className="w-full text-left text-sm rounded-2xl px-4 py-3 bg-zinc-100 dark:bg-[#0a0a0a] text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-teal-500/20 hover:border-teal-500 active:scale-[0.99] transition"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="max-w-3xl mx-auto space-y-3">
+                  {current.messages.map((m) => (
+                    <Message
+                      key={m.id}
+                      msg={m}
+                      onOpenSettings={openSettings}
+                      onSpeak={toggleSpeak}
+                      speaking={speakingId === m.id}
+                      onOpenImage={setFullscreenImg}
+                    />
+                  ))}
+                  {typing && streamText === '' && (
+                    <Typing
+                      label={
+                        loadingImg
+                          ? 'Criando a imagem...'
+                          : loadingWeb
+                            ? 'Pesquisando na internet...'
+                            : undefined
+                      }
+                    />
+                  )}
+                  {typing && streamText !== '' && (
+                    <Message
+                      msg={{ id: 'stream', role: 'model', text: streamText, ts: 0, streaming: true }}
+                      onOpenSettings={openSettings}
+                      onOpenImage={setFullscreenImg}
+                    />
+                  )}
+                  <div ref={endRef} />
+                </div>
+              )}
+            </div>
+
+            <div
+              className="px-3 pt-2 bg-white dark:bg-[#000000] border-t border-zinc-200 dark:border-teal-500/20"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)' }}
+            >
+              <div className="max-w-3xl mx-auto">
+                {pending.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto thin-scroll pb-2">
+                    {pending.map((p) => (
+                      <div
+                        key={p.id}
+                        className="shrink-0 flex items-center gap-2 max-w-[220px] rounded-xl bg-zinc-100 dark:bg-[#111111] pl-2 pr-1 py-1.5 text-xs"
+                      >
+                        {p.preview ? (
+                          <img src={p.preview} alt="" className="w-8 h-8 rounded-lg object-cover" />
+                        ) : (
+                          <span className="w-8 h-8 rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                            <Icon name="file" className="w-4 h-4" />
+                          </span>
+                        )}
+                        <span className="truncate">{p.file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removePending(p.id)}
+                          className="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                          aria-label="Remover anexo"
+                        >
+                          <Icon name="x" className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-end gap-1.5">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,text/*,.txt,.md,.csv,.json,.html,.css,.js,.jsx,.xml"
+                    onChange={onPickFiles}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={loadingId !== null}
+                    className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-zinc-100 dark:bg-[#111111] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-white/10 disabled:opacity-40 transition"
+                    aria-label="Enviar imagem ou arquivo"
+                  >
+                    <Icon name="plus" className="w-5 h-5" />
+                  </button>
+                  <textarea
+                    ref={taRef}
+                    rows={1}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={onKeyDown}
+                    placeholder={listening ? 'Ouvindo...' : 'Digite sua mensagem...'}
+                    enterKeyHint="send"
+                    className="flex-1 min-w-0 resize-none rounded-3xl bg-zinc-100 dark:bg-[#111111] text-zinc-950 dark:text-white px-3.5 py-2.5 text-[15px] outline-none border border-transparent focus:border-teal-500 max-h-36 leading-snug"
+                  />
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition ${
+                      listening
+                        ? 'bg-red-500 text-white animate-pulse'
+                        : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10'
+                    }`}
+                    aria-label={listening ? 'Parar de ouvir' : 'Falar'}
+                  >
+                    <Icon name="mic" className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => send()}
+                    disabled={(!input.trim() && pending.length === 0) || loadingId !== null}
+                    className="shrink-0 w-11 h-11 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500 text-black flex items-center justify-center shadow-lg shadow-teal-900/30 disabled:opacity-40 active:scale-95 transition"
+                    aria-label="Enviar"
+                  >
+                    <Icon name="send" className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </main>
+
+      <FullscreenImageModal
+        imageUrl={fullscreenImg}
+        onClose={() => setFullscreenImg('')}
+        onNotify={showToast}
+      />
+
+      {toast && (
+        <div
+          className="fixed left-1/2 -translate-x-1/2 z-[60] max-w-[90%] rounded-full bg-[#0a0a0a] border border-teal-500/40 text-white text-sm px-4 py-2 shadow-lg text-center"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom) + 84px)' }}
+          role="status"
+        >
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
