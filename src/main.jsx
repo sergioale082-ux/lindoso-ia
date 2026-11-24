@@ -9,9 +9,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>
 )
 
-// Registra o service worker (necessário pra instalar como app)
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {})
+// Desliga o cache velho que tava deixando a tela preta
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((r) => r.unregister())
   })
 }
