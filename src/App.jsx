@@ -1,247 +1,127 @@
-import React, { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 
-const uid = () => Math.random().toString(36).slice(2, 10)
-const LS = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d } catch { return d } }
-const saveLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
-
-const downloadImage = async (url, name) => {
-  try {
-    const r = await fetch(url, { mode: 'cors' })
-    const b = await r.blob()
-    const u = URL.createObjectURL(b)
-    const a = document.createElement('a')
-    a.href = u; a.download = name || 'lindoso-imagem.png'
-    document.body.appendChild(a); a.click(); a.remove()
-    setTimeout(() => URL.revokeObjectURL(u), 3000)
-  } catch {
-    const a = document.createElement('a')
-    a.href = url; a.download = name || 'lindoso-imagem.png'; a.target = '_blank'
-    document.body.appendChild(a); a.click(); a.remove()
-  }
-}
-const shareImage = async (url, text) => {
-  try {
-    const r = await fetch(url, { mode: 'cors' })
-    const b = await r.blob()
-    const file = new File([b], 'lindoso-imagem.png', { type: b.type || 'image/png' })
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ title: 'LINDOSO IA', text: text || 'Imagem criada no LINDOSO IA', files: [file] })
-      return true
-    }
-    throw new Error('no-share')
-  } catch {
-    if (navigator.share) { try { await navigator.share({ title: 'LINDOSO IA', text: text || 'Imagem', url }); return true } catch {} }
-    await navigator.clipboard.writeText(url).catch(()=>{})
-    return false
-  }
-}
-
-async function gerarImagemHD(texto) {
-  const prompt = encodeURIComponent(texto + ', high quality, ultra detailed, sharp, 4k, professional lighting, no watermark, no text')
-  const q = LS('lindoso_qualidade_imagem', 'hd')
-  const sizes = { normal: '768x768', hd: '1024x1024', ultra: '1280x1280' }
-  const [w, h] = (sizes[q] || '1024x1024').split('x')
-  const url = `https://image.pollinations.ai/prompt/${prompt}?width=${w}&height=${h}&seed=${Date.now()}&model=flux&nologo=true&enhance=true`
-  return { url }
-}
-
-async function falarComGemini(texto, historico) {
-  const key = LS('lindoso_gemini_key', '')
-  if (!key) return { error: 'sem-chave' }
-  const contents = [...historico.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: texto }] }]
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents, systemInstruction: { parts: [{ text: 'Você é o LINDOSO IA, um assistente brasileiro, simpático, direto, que fala como um amigo. Responda em português, de forma curta e útil.' }] } })
-  })
-  const data = await res.json()
-  if (data.error) throw new Error(data.error.message || 'Erro Gemini')
-  return { text: data.candidates?.[0]?.content?.parts?.[0]?.text || 'Não consegui responder agora.' }
-}
-
-function ImageViewer({ src, onClose, onDownload, onShare }) {
-  if (!src) return null
-  return (
-    <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col" onClick={onClose}>
-      <div className="flex justify-between items-center p-4 text-white">
-        <button onClick={onClose} className="px-5 py-2.5 rounded-full bg-white/15 font-bold">✕ Fechar</button>
-        <span className="text-xs opacity-70">Toque fora para fechar</span>
-      </div>
-      <div className="flex-1 flex items-center justify-center p-3" onClick={onClose}>
-        <img src={src} className="max-w-full max-h-full rounded-2xl object-contain" alt="Ampliada" />
-      </div>
-      <div className="p-4 flex gap-2 pb-6">
-        <button onClick={(e) => { e.stopPropagation(); onDownload() }} className="flex-1 py-4 rounded-2xl bg-teal-400 text-black font-bold">⬇ Baixar</button>
-        <button onClick={(e) => { e.stopPropagation(); onShare() }} className="flex-1 py-4 rounded-2xl bg-white/15 text-white font-bold">↗ Compartilhar</button>
-      </div>
-    </div>
-  )
+// Monograma Geométrico - sem foto, sem <img>, sem emoji, sem ícone quebrado
+const Geo = ({ type }) => {
+  const s = { display: 'inline-block', verticalAlign: 'middle', marginRight: 8 }
+  if (type === 'key') return <span style={s}><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="8" cy="8" r="5" stroke="#00E5C0" strokeWidth="2.5"/><path d="M12 12 L20 20 M16 16 L20 12" stroke="#00E5C0" strokeWidth="2.5"/></svg></span>
+  if (type === 'gear') return <span style={s}><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" transform="rotate(45 12 12)" stroke="#00E5C0" strokeWidth="2.5"/><circle cx="12" cy="12" r="3" fill="#00E5C0"/></svg></span>
+  if (type === 'moon') return <span style={s}><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 4 L12 12 L4 20 Z" fill="#000"/><path d="M12 4 L20 12 L12 20 Z" fill="#00E5C0"/></svg></span>
+  if (type === 'sun') return <span style={s}><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" fill="#FFC107"/><path d="M12 2 L12 6 M12 18 L12 22 M2 12 L6 12 M18 12 L22 12" stroke="#FFC107" strokeWidth="2.5"/></svg></span>
+  if (type === 'trash') return <span style={s}><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 7 L19 7 L17 21 L7 21 Z" stroke="#FF6B6B" strokeWidth="2"/><path d="M9 7 L12 3 L15 7" stroke="#FF6B6B" strokeWidth="2"/></svg></span>
+  if (type === 'logo') return <span style={{ display: 'inline-flex', width: 44, height: 44, borderRadius: 14, background: '#00E5C0', alignItems: 'center', justifyContent: 'center' }}><svg width="30" height="30" viewBox="0 0 48 48"><path d="M12 10 L12 38 L36 38" stroke="#000" strokeWidth="7" fill="none" strokeLinecap="square" /><path d="M28 10 L38 20 L28 30 L18 20 Z" fill="#000" /></svg></span>
+  return null
 }
 
 export default function App() {
-  const [view, setView] = useState(() => sessionStorage.getItem('lindoso_view') || 'chat')
-  const [chats, setChats] = useState(() => LS('lindoso_chats', []))
-  const [activeId, setActiveId] = useState(() => sessionStorage.getItem('lindoso_active') || null)
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [lightbox, setLightbox] = useState(null)
-  const [toast, setToast] = useState('')
-  const [imgQ, setImgQ] = useState(() => LS('lindoso_qualidade_imagem', 'hd'))
-  const [memLimit, setMemLimit] = useState(() => LS('lindoso_memoria_limite', 20))
-  const [theme, setTheme] = useState(() => LS('lindoso_tema', 'dark'))
-  const [geminiKey, setGeminiKey] = useState(() => LS('lindoso_gemini_key', ''))
-  const scrollRef = useRef(null)
+  const [view, setView] = useState('chat')
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_key') || '')
+  const [quality, setQuality] = useState('ULTRA')
+  const [memory, setMemory] = useState(50)
+  const [theme, setTheme] = useState('Escuro')
+  const [msg, setMsg] = useState('')
+  const [chats, setChats] = useState(() => JSON.parse(localStorage.getItem('chats') || '[]'))
+  const [selected, setSelected] = useState(null)
+  const [showDelete, setShowDelete] = useState(false)
 
-  useEffect(() => { document.documentElement.style.overscrollBehavior = 'none'; document.body.style.overscrollBehavior = 'none' }, [])
-  useEffect(() => { saveLS('lindoso_chats', chats) }, [chats])
-  useEffect(() => { sessionStorage.setItem('lindoso_view', view); sessionStorage.setItem('lindoso_active', activeId || '') }, [view, activeId])
-  useEffect(() => { saveLS('lindoso_qualidade_imagem', imgQ); saveLS('lindoso_memoria_limite', memLimit); saveLS('lindoso_tema', theme); saveLS('lindoso_gemini_key', geminiKey) }, [imgQ, memLimit, theme, geminiKey])
+  useEffect(() => { localStorage.setItem('gemini_key', apiKey) }, [apiKey])
+  useEffect(() => { localStorage.setItem('chats', JSON.stringify(chats)) }, [chats])
 
-  const activeChat = chats.find(c => c.id === activeId) || null
+  const dark = theme === 'Escuro'
+  const bg = dark ? '#0A0A0A' : '#FFFFFF'
+  const card = dark ? '#1A1A1A' : '#F2F2F2'
+  const text = dark ? '#FFF' : '#000'
+  const sub = dark ? '#AAA' : '#666'
 
-  const newChat = () => {
-    const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now() }
-    setChats(prev => [c, ...prev].slice(0, memLimit))
-    setActiveId(c.id); setView('chat')
+  const btn = (active) => ({
+    flex: 1, padding: '12px 0', borderRadius: 20, border: `1px solid ${active ? '#00E5C0' : sub}`,
+    background: active ? '#00E5C0' : 'transparent', color: active ? '#000' : text,
+    fontWeight: 800, cursor: 'pointer', fontSize: 15
+  })
+
+  const openChat = (index) => {
+    setSelected(index)
+    setShowDelete(true)
   }
 
-  const send = async () => {
-    if (!input.trim() || loading) return
-    const text = input.trim()
-    setInput('')
-    let chatId = activeId
-    let historicoAtual = activeChat ? activeChat.messages : []
-    if (!chatId) {
-      const c = { id: uid(), title: text.slice(0, 30), messages: [], createdAt: Date.now() }
-      setChats(prev => [c, ...prev]); setActiveId(c.id); chatId = c.id
-    }
-    const userMsg = { id: uid(), role: 'user', text, ts: Date.now() }
-    setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.messages.length === 0 ? text.slice(0, 30) : c.title, messages: [...c.messages, userMsg] } : c))
-    setLoading(true)
-    try {
-      const isImage = /imagem|foto|logo|desenho|cria uma|gera uma|ilustra|criar imagem/i.test(text)
-      if (isImage) {
-        const img = await gerarImagemHD(text)
-        const modelMsg = { id: uid(), role: 'model', text: 'Aqui está sua imagem! Toque para ampliar, baixar ou compartilhar.', image: img.url, ts: Date.now() }
-        setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
-      } else {
-        const res = await falarComGemini(text, historicoAtual)
-        if (res.error === 'sem-chave') {
-          const modelMsg = { id: uid(), role: 'model', text: '⚠️ Pra eu voltar a conversar, coloca tua chave do Gemini nas Configurações (⚙️). É só 1 vez. Clica no ⚙️ lá em cima > cola a chave > Voltar pro Chat.', ts: Date.now() }
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
-        } else {
-          const modelMsg = { id: uid(), role: 'model', text: res.text, ts: Date.now() }
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
-        }
-      }
-    } catch (e) {
-      const modelMsg = { id: uid(), role: 'model', text: 'Deu erro no Gemini: ' + e.message + '. Confere se a chave tá certa nas Configurações.', ts: Date.now() }
-      setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
-    }
-    setLoading(false)
+  const deleteOne = () => {
+    const nova = chats.filter((_, i) => i !== selected)
+    setChats(nova)
+    setShowDelete(false)
+    setSelected(null)
   }
-
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight }, [activeChat?.messages?.length, loading])
 
   return (
-    <div className={`min-h-screen ${theme === 'dark' ? 'bg-[#0b0b0c] text-white' : 'bg-zinc-50 text-black'}`}>
-      <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 bg-[#0b0b0c]/90 backdrop-blur border-b border-white/10">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full overflow-hidden bg-[#14B8A6] flex items-center justify-center shrink-0"><img src="/logo.png" className="w-full h-full object-cover" alt="LINDOSO IA" /></div>
-          <div><p className="font-bold leading-none">LINDOSO IA</p><p className="text-[11px] opacity-60">Online • v3 com Chat</p></div>
+    <div style={{ background: bg, color: text, minHeight: '100vh', fontFamily: 'sans-serif', paddingBottom: 40 }}>
+      {/* HEADER - LOGO ARRUMADA, SÓ SVG */}
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 10 }}>
+        <Geo type="logo" />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 900, fontSize: 20 }}>LINDOSO IA</div>
+          <div style={{ color: sub, fontSize: 13 }}>Online • v3 com Chat</div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={newChat} className="px-4 py-2 rounded-full bg-teal-400 text-black font-bold text-sm">+ Novo</button>
-          <button onClick={() => setView(view === 'settings' ? 'chat' : 'settings')} className="px-4 py-2 rounded-full bg-white/10 font-bold text-sm">⚙️</button>
-        </div>
-      </header>
+        <button onClick={() => { setView('chat'); setShowDelete(false) }} style={{ background: '#00E5C0', border: 'none', padding: '10px 18px', borderRadius: 20, fontWeight: 800 }}>+ Novo</button>
+        <button onClick={() => setView(view === 'settings' ? 'chat' : 'settings')} style={{ background: card, border: 'none', width: 44, height: 44, borderRadius: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Geo type="gear" /></button>
+      </div>
 
       {view === 'settings' ? (
-        <div className="max-w-xl mx-auto p-4 space-y-4">
-          <h2 className="text-xl font-bold">Configurações</h2>
-          <section className="p-4 rounded-3xl bg-white/5 border border-white/10">
-            <h3 className="font-bold mb-2">🔑 Chave do Gemini - REATIVAR CHAT</h3>
-            <p className="text-sm opacity-70 mb-3">Cole sua chave aqui 1 vez só. Ela fica salva no seu celular.</p>
-            <input value={geminiKey} onChange={e => setGeminiKey(e.target.value.trim())} placeholder="Cole sua chave AIza..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none" />
-            <p className="text-xs opacity-50 mt-2">{geminiKey ? '✅ Chave salva! Pode voltar pro chat.' : '❌ Sem chave - o chat vai pedir pra colocar.'}</p>
-            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="block text-center mt-3 py-3 rounded-2xl bg-white/10 font-bold text-sm">Pegar chave grátis no Google AI Studio</a>
-          </section>
-          <section className="p-4 rounded-3xl bg-white/5 border border-white/10">
-            <h3 className="font-bold mb-3">⚙️ Configuração da IA</h3>
-            <p className="text-sm opacity-70 mb-2">Qualidade da imagem</p>
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {['normal','hd','ultra'].map(q => (
-                <button key={q} onClick={() => setImgQ(q)} className={`py-3 rounded-2xl border font-bold text-sm ${imgQ===q ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>{q.toUpperCase()}</button>
-              ))}
+        <div style={{ padding: '0 16px' }}>
+          <h2 style={{ fontSize: 26, fontWeight: 900 }}>Configurações</h2>
+
+          <div style={{ background: card, borderRadius: 24, padding: 20, marginBottom: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}><Geo type="key" />Chave do Gemini - REATIVAR CHAT</div>
+            <p style={{ color: sub }}>Cole sua chave aqui 1 vez só. Ela fica salva no seu celular.</p>
+            <input value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Cole sua chave aqui" style={{ width: '100%', padding: 14, borderRadius: 14, border: 'none', background: dark ? '#2A2A2A' : '#DDD', color: text, boxSizing: 'border-box' }} />
+            {apiKey && <p style={{ color: '#00E5C0', fontSize: 14 }}>Chave salva! Pode voltar pro chat.</p>}
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ display: 'block', textAlign: 'center', background: dark ? '#333' : '#DDD', color: text, padding: 12, borderRadius: 14, textDecoration: 'none', fontWeight: 700, marginTop: 10 }}>Pegar chave grátis no Google AI Studio</a>
+          </div>
+
+          <div style={{ background: card, borderRadius: 24, padding: 20 }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}><Geo type="gear" />Configuração da IA</div>
+            <p style={{ color: sub }}>Qualidade da imagem</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['NORMAL','HD','ULTRA'].map(q => <button key={q} onClick={() => setQuality(q)} style={btn(quality===q)}>{q}</button>)}
             </div>
-            <p className="text-sm opacity-70 mb-2">Memória</p>
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {[10,20,50].map(n => (
-                <button key={n} onClick={() => setMemLimit(n)} className={`py-3 rounded-2xl border font-bold text-sm ${memLimit===n ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>{n}</button>
-              ))}
+            <p style={{ color: sub, marginTop: 18 }}>Memória</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[10,20,50].map(m => <button key={m} onClick={() => setMemory(m)} style={btn(memory===m)}>{m}</button>)}
             </div>
-            <p className="text-sm opacity-70 mb-2">Tema</p>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setTheme('dark')} className={`py-3 rounded-2xl border font-bold ${theme==='dark' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>🌙 Escuro</button>
-              <button onClick={() => setTheme('light')} className={`py-3 rounded-2xl border font-bold ${theme==='light' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>☀️ Claro</button>
+            <p style={{ color: sub, marginTop: 18 }}>Tema</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setTheme('Escuro')} style={btn(theme==='Escuro')}><Geo type="moon" />Escuro</button>
+              <button onClick={() => setTheme('Claro')} style={btn(theme==='Claro')}><Geo type="sun" />Claro</button>
             </div>
-          </section>
-          <button onClick={() => { localStorage.removeItem('lindoso_chats'); setChats([]); setToast('Histórico limpo!'); setTimeout(()=>setToast(''),2000) }} className="w-full py-3 rounded-2xl bg-red-500/20 text-red-300 font-bold">🗑 Limpar todo histórico</button>
-          <button onClick={() => setView('chat')} className="w-full py-4 rounded-2xl bg-teal-400 text-black font-bold">Voltar pro Chat</button>
+          </div>
+
+          {/* SEM BOTÃO DE LIMPAR TUDO - REMOVIDO COMO TU PEDIU */}
         </div>
       ) : (
-        <>
-          {chats.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto px-4 py-3">
-              {chats.map(c => (
-                <button key={c.id} onClick={() => { setActiveId(c.id); setView('chat') }} className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium ${c.id===activeId ? 'bg-teal-400 text-black' : 'bg-white/10'}`}>{c.title || 'Conversa'}</button>
-              ))}
+        <div style={{ padding: '0 16px' }}>
+          <p style={{ color: sub }}>Olá! Sou o LINDOSO IA, teu parceiro de Belém. O que vamos criar hoje?</p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input value={msg} onChange={e => setMsg(e.target.value)} placeholder="Pergunte qualquer coisa..." style={{ flex: 1, padding: 14, borderRadius: 20, border: 'none', background: card, color: text }} />
+            <button onClick={() => { if(msg.trim()){ setChats([...chats, msg]); setMsg('') } }} style={{ background: '#00E5C0', border: 'none', padding: '0 20px', borderRadius: 20, fontWeight: 800 }}>Enviar</button>
+          </div>
+
+          <p style={{ color: sub, marginTop: 20, fontSize: 14 }}>Toque em uma conversa para abrir / apagar só ela:</p>
+          {chats.map((c,i) => (
+            <div key={i} onClick={() => openChat(i)} style={{ background: selected === i ? '#00E5C0' : card, color: selected === i ? '#000' : text, padding: 14, borderRadius: 14, marginTop: 10, cursor: 'pointer', fontWeight: selected === i ? 700 : 400 }}>
+              {c}
+            </div>
+          ))}
+
+          {/* CAIXINHA DE APAGAR SÓ AQUELA CONVERSA */}
+          {showDelete && selected !== null && (
+            <div style={{ background: card, borderRadius: 20, padding: 16, marginTop: 16, border: '1px solid #333' }}>
+              <p style={{ fontWeight: 800, margin: '0 0 6px 0' }}>Conversa selecionada:</p>
+              <p style={{ color: sub, margin: '0 0 14px 0' }}>{chats[selected]}</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setShowDelete(false)} style={{ flex: 1, padding: 12, borderRadius: 14, border: 'none', background: dark ? '#333' : '#DDD', color: text, fontWeight: 700 }}>Cancelar</button>
+                <button onClick={deleteOne} style={{ flex: 1, padding: 12, borderRadius: 14, border: 'none', background: '#4A1A1A', color: '#FF8A8A', fontWeight: 800 }}><Geo type="trash" />Apagar só essa</button>
+              </div>
             </div>
           )}
-          <div ref={scrollRef} className="max-w-2xl mx-auto px-4 pb-32 pt-2 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
-            {!activeChat || activeChat.messages.length === 0 ? (
-              <div className="text-center pt-10">
-                <div className="w-20 h-20 mx-auto rounded-[28px] overflow-hidden bg-[#14B8A6] flex items-center justify-center mb-4"><img src="/logo.png" className="w-full h-full object-cover" alt="LINDOSO IA" /></div>
-                <h1 className="text-2xl font-black">Olá, eu sou o LINDOSO IA</h1>
-                <p className="opacity-60 text-sm mt-2">Peça para criar imagens, logos, textos e muito mais.</p>
-                <div className="grid grid-cols-2 gap-2 mt-6 text-left">
-                  {['🎨 Cria uma logo de pizzaria', '🖼️ Cria uma imagem de praia', '✍️ Me ajuda num texto', '💡 Me dá uma ideia de negócio'].map(s => (
-                    <button key={s} onClick={() => setInput(s.replace(/^[🎨🖼️✍️💡] /,''))} className="p-3 rounded-2xl bg-white/5 border border-white/10 text-sm text-left">{s}</button>
-                  ))}
-                </div>
-              </div>
-            ) : activeChat.messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] px-4 py-3 rounded-[22px] shadow-md ${msg.role === 'user' ? 'bg-teal-400 text-black rounded-br-md' : 'bg-[#161617] border border-white/5 rounded-bl-md'}`}>
-                  <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                  {msg.image && (
-                    <div className="mt-3">
-                      <button onClick={() => setLightbox(msg.image)} className="block w-full">
-                        <img src={msg.image} className="rounded-2xl w-full border border-white/10" alt="Imagem gerada" />
-                      </button>
-                      <div className="flex gap-2 mt-2">
-                        <button onClick={() => setLightbox(msg.image)} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold">🔍 Ampliar</button>
-                        <button onClick={() => downloadImage(msg.image, 'lindoso-imagem.png')} className="flex-1 py-2.5 rounded-xl bg-teal-400 text-black text-xs font-bold">⬇ Baixar</button>
-                        <button onClick={() => shareImage(msg.image, 'Imagem criada no LINDOSO IA')} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold">↗ Compartilhar</button>
-                      </div>
-                      <p className="text-[11px] opacity-50 mt-1">Toque na imagem para ver em tela cheia</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-            {loading && <p className="text-center text-sm opacity-60 animate-pulse">LINDOSO está pensando...</p>}
-          </div>
-          <div className="fixed bottom-0 left-0 right-0 p-3 bg-[#0b0b0c]/95 backdrop-blur border-t border-white/10">
-            <div className="max-w-2xl mx-auto flex gap-2 items-end">
-              <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="Pergunte ou peça uma imagem..." className="flex-1 bg-white/10 rounded-[22px] px-4 py-3 text-[15px] outline-none resize-none max-h-[120px]" rows={1} />
-              <button onClick={send} className="w-12 h-12 shrink-0 rounded-full bg-teal-400 text-black font-black text-xl">↑</button>
-            </div>
-          </div>
-        </>
+        </div>
       )}
-      <ImageViewer src={lightbox} onClose={() => setLightbox(null)} onDownload={() => lightbox && downloadImage(lightbox, 'lindoso-imagem.png')} onShare={() => lightbox && shareImage(lightbox, 'Imagem criada no LINDOSO IA')} />
-      {toast && <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-black text-white px-4 py-2 rounded-full text-sm z-[110]">{toast}</div>}
     </div>
   )
 }
