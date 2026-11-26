@@ -36,6 +36,35 @@ const shareImage = async (url, text) => {
   }
 }
 
+// Ícones Monograma Geométrico (substituem os emojis)
+const ICONS = {
+  galeria: <><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="9" cy="10" r="1.6" /><path d="M3 18l6-5 5 4 3-3 4 4" /></>,
+  camera: <><rect x="3" y="7" width="18" height="13" rx="3" /><circle cx="12" cy="13.5" r="3.5" /><path d="M8 7l1.5-3h5L16 7" /></>,
+  arquivo: <><path d="M6 3h8l5 5v13H6z" /><path d="M14 3v5h5" /></>,
+  config: <><circle cx="12" cy="12" r="4" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5L19 19M19 5l-2.5 2.5M7.5 16.5L5 19" /></>,
+  chave: <><circle cx="8" cy="15" r="4" /><path d="M11 12l9-9M16 7l3 3" /></>,
+  lixeira: <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></>,
+  aviso: <><path d="M12 3l10 18H2z" /><path d="M12 10v5M12 18v.5" /></>,
+  lua: <><path d="M20 14A8 8 0 1 1 10 4a6.5 6.5 0 0 0 10 10z" /></>,
+  sol: <><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></>,
+  ok: <><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></>,
+  no: <><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></>,
+  baixar: <><path d="M12 4v11M7 11l5 5 5-5M5 20h14" /></>,
+  compartilhar: <><path d="M7 17L17 7M9 7h8v8" /></>,
+  ampliar: <><circle cx="11" cy="11" r="6" /><path d="M16 16l5 5" /></>,
+  logo: <><path d="M12 3l9 9-9 9-9-9z" /><circle cx="12" cy="12" r="2.5" /></>,
+  texto: <><path d="M4 6h16M4 12h16M4 18h10" /></>,
+}
+function Ico({ n, size = 18, tile = false, className = '' }) {
+  const glyph = (
+    <svg width={tile ? Math.round(size * 0.62) : size} height={tile ? Math.round(size * 0.62) : size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICONS[n]}</svg>
+  )
+  if (!tile) return <span className={`inline-flex shrink-0 items-center justify-center ${className}`}>{glyph}</span>
+  return (
+    <span className={`inline-flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-teal-400 to-violet-500 text-black ${className}`} style={{ width: size, height: size }}>{glyph}</span>
+  )
+}
+
 function limparPrompt(texto) {
   let t = texto.toLowerCase()
   t = t.replace(/cria|criar|gera|gerar|me mostre|me mostra|faz|fazer|uma|um|de|foto|imagem|pra|para/g, ' ').trim()
@@ -74,7 +103,7 @@ async function falarComGemini(texto, historico, anexo) {
     parts.push({ inline_data: { mime_type: anexo.type, data: anexo.base64.split(',')[1] } })
   }
   const contents = [...historico.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] })), { role: 'user', parts }]
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contents, systemInstruction: { parts: [{ text: 'Você é o LINDOSO IA, assistente brasileiro, simpático, direto. Se o usuário mandar foto, descreva e responda sobre ela. Responda em português, curto e útil.' }] } })
@@ -96,8 +125,8 @@ function ImageViewer({ src, onClose, onDownload, onShare }) {
         <img src={src} className="max-w-full max-h-full rounded-2xl object-contain" alt="Ampliada" />
       </div>
       <div className="p-4 flex gap-2 pb-6">
-        <button onClick={(e) => { e.stopPropagation(); onDownload() }} className="flex-1 py-4 rounded-2xl bg-teal-400 text-black font-bold">⬇ Baixar</button>
-        <button onClick={(e) => { e.stopPropagation(); onShare() }} className="flex-1 py-4 rounded-2xl bg-white/15 text-white font-bold">↗ Compartilhar</button>
+        <button onClick={(e) => { e.stopPropagation(); onDownload() }} className="flex-1 py-4 rounded-2xl bg-teal-400 text-black font-bold inline-flex items-center justify-center gap-2"><Ico n="baixar" /> Baixar</button>
+        <button onClick={(e) => { e.stopPropagation(); onShare() }} className="flex-1 py-4 rounded-2xl bg-white/15 text-white font-bold inline-flex items-center justify-center gap-2"><Ico n="compartilhar" /> Compartilhar</button>
       </div>
     </div>
   )
@@ -112,9 +141,9 @@ function ImagemComFallback({ url, fallback }) {
         <img src={src} onError={() => { if (src !== fallback) setSrc(fallback) }} className="rounded-2xl w-full border border-white/10 bg-white" alt="Imagem gerada" />
       </button>
       <div className="flex gap-2 mt-2">
-        <button onClick={() => setLb(src)} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold">🔍 Ampliar</button>
-        <button onClick={() => downloadImage(src, 'lindoso-imagem.png')} className="flex-1 py-2.5 rounded-xl bg-teal-400 text-black text-xs font-bold">⬇ Baixar</button>
-        <button onClick={() => shareImage(src, 'Imagem criada no LINDOSO IA')} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold">↗ Compartilhar</button>
+        <button onClick={() => setLb(src)} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold inline-flex items-center justify-center gap-1.5"><Ico n="ampliar" size={14} /> Ampliar</button>
+        <button onClick={() => downloadImage(src, 'lindoso-imagem.png')} className="flex-1 py-2.5 rounded-xl bg-teal-400 text-black text-xs font-bold inline-flex items-center justify-center gap-1.5"><Ico n="baixar" size={14} /> Baixar</button>
+        <button onClick={() => shareImage(src, 'Imagem criada no LINDOSO IA')} className="flex-1 py-2.5 rounded-xl bg-white/10 text-xs font-bold inline-flex items-center justify-center gap-1.5"><Ico n="compartilhar" size={14} /> Compartilhar</button>
       </div>
       <p className="text-[11px] opacity-50 mt-1">Toque na imagem para ver em tela cheia</p>
       {lb && <ImageViewer src={src} onClose={() => setLb(false)} onDownload={() => downloadImage(src, 'lindoso-imagem.png')} onShare={() => shareImage(src, 'Imagem criada no LINDOSO IA')} />}
@@ -197,7 +226,7 @@ export default function App() {
       } else {
         const res = await falarComGemini(text, historicoAtual, anexoAtual)
         if (res.error === 'sem-chave') {
-          const modelMsg = { id: uid(), role: 'model', text: '⚠️ Pra eu conversar e analisar foto/arquivo, coloca tua chave do Gemini nas Configurações (⚙️).', ts: Date.now() }
+          const modelMsg = { id: uid(), role: 'model', text: 'Atenção: pra eu conversar e analisar foto/arquivo, coloca tua chave do Gemini nas Configurações (engrenagem no topo).', ts: Date.now() }
           setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
         } else {
           const modelMsg = { id: uid(), role: 'model', text: res.text, ts: Date.now() }
@@ -222,7 +251,7 @@ export default function App() {
         </div>
         <div className="flex gap-2">
           <button onClick={newChat} className="px-4 py-2 rounded-full bg-teal-400 text-black font-bold text-sm">+ Novo</button>
-          <button onClick={() => setView(view === 'settings' ? 'chat' : 'settings')} className="px-4 py-2 rounded-full bg-white/10 font-bold text-sm">⚙️</button>
+          <button onClick={() => setView(view === 'settings' ? 'chat' : 'settings')} className="px-4 py-2 rounded-full bg-white/10 font-bold text-sm inline-flex items-center justify-center" aria-label="Configurações"><Ico n="config" size={20} /></button>
         </div>
       </header>
 
@@ -232,16 +261,16 @@ export default function App() {
 
           {/* 1 - CHAVES - SÓ CHAVE, NADA MAIS */}
           <section className="p-4 rounded-3xl bg-white/5 border border-white/10">
-            <h3 className="font-bold mb-2">🔑 Chaves da IA</h3>
+            <h3 className="font-bold mb-2 flex items-center gap-2"><Ico n="chave" tile size={26} /> Chaves da IA</h3>
             <p className="text-sm opacity-70 mb-3">Cole sua chave do Gemini aqui 1 vez só. Ela fica salva só no seu celular.</p>
             <input value={geminiKey} onChange={e => setGeminiKey(e.target.value.trim())} placeholder="Cole sua chave AIza..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none" />
-            <p className="text-xs opacity-50 mt-2">{geminiKey ? '✅ Chave salva! Pode voltar pro chat.' : '❌ Sem chave - o chat vai pedir pra colocar.'}</p>
+            <p className="text-xs opacity-50 mt-2">{geminiKey ? <span className="inline-flex items-center gap-1.5"><Ico n="ok" size={14} /> Chave salva! Pode voltar pro chat.</span> : <span className="inline-flex items-center gap-1.5"><Ico n="no" size={14} /> Sem chave - o chat vai pedir pra colocar.</span>}</p>
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="block text-center mt-3 py-3 rounded-2xl bg-white/10 font-bold text-sm">Pegar chave grátis no Google AI Studio</a>
           </section>
 
           {/* 2 - CONFIGURAÇÃO */}
           <section className="p-4 rounded-3xl bg-white/5 border border-white/10">
-            <h3 className="font-bold mb-3">⚙️ Configuração da IA</h3>
+            <h3 className="font-bold mb-3 flex items-center gap-2"><Ico n="config" tile size={26} /> Configuração da IA</h3>
             <p className="text-sm opacity-70 mb-2">Qualidade da imagem</p>
             <div className="grid grid-cols-3 gap-2 mb-4">
               {['normal','hd','ultra'].map(q => (
@@ -256,17 +285,17 @@ export default function App() {
             </div>
             <p className="text-sm opacity-70 mb-2">Tema</p>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setTheme('dark')} className={`py-3 rounded-2xl border font-bold ${theme==='dark' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>🌙 Escuro</button>
-              <button onClick={() => setTheme('light')} className={`py-3 rounded-2xl border font-bold ${theme==='light' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}>☀️ Claro</button>
+              <button onClick={() => setTheme('dark')} className={`py-3 rounded-2xl border font-bold inline-flex items-center justify-center gap-2 ${theme==='dark' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}><Ico n="lua" /> Escuro</button>
+              <button onClick={() => setTheme('light')} className={`py-3 rounded-2xl border font-bold inline-flex items-center justify-center gap-2 ${theme==='light' ? 'bg-teal-400 text-black' : 'bg-white/5'}`}><Ico n="sol" /> Claro</button>
             </div>
           </section>
 
           {/* 3 - ZONA DE PERIGO - SEPARADO LONGE DAS CHAVES */}
           <section className="p-4 rounded-3xl bg-red-500/5 border border-red-500/20">
-            <h3 className="font-bold mb-2">🗑️ Zona de Perigo</h3>
+            <h3 className="font-bold mb-2 flex items-center gap-2"><Ico n="aviso" tile size={26} /> Zona de Perigo</h3>
             <p className="text-sm opacity-70 mb-3">Isso apaga TODAS as conversas. Não apaga sua chave.</p>
             {!confirmClear ? (
-              <button onClick={() => setConfirmClear(true)} className="w-full py-3 rounded-2xl bg-red-500/20 text-red-300 font-bold">🗑 Limpar todo histórico</button>
+              <button onClick={() => setConfirmClear(true)} className="w-full py-3 rounded-2xl bg-red-500/20 text-red-300 font-bold inline-flex items-center justify-center gap-2"><Ico n="lixeira" /> Limpar todo histórico</button>
             ) : (
               <div className="space-y-2">
                 <p className="text-sm font-bold text-center">Tem certeza? Não tem volta!</p>
@@ -296,8 +325,8 @@ export default function App() {
                 <h1 className="text-2xl font-black">Olá, eu sou o LINDOSO IA</h1>
                 <p className="opacity-60 text-sm mt-2">Manda foto, arquivo ou pede pra criar imagem.</p>
                 <div className="grid grid-cols-2 gap-2 mt-6 text-left">
-                  {['🎨 Cria uma logo de pizzaria', '🖼️ Cria uma imagem de praia', '📷 Manda uma foto pra eu analisar', '✍️ Me ajuda num texto'].map(s => (
-                    <button key={s} onClick={() => setInput(s.replace(/^[🎨🖼️📷✍️] /,''))} className="p-3 rounded-2xl bg-white/5 border border-white/10 text-sm text-left">{s}</button>
+                  {[['logo', 'Cria uma logo de pizzaria'], ['galeria', 'Cria uma imagem de praia'], ['camera', 'Manda uma foto pra eu analisar'], ['texto', 'Me ajuda num texto']].map(([ic, s]) => (
+                    <button key={s} onClick={() => setInput(s)} className="p-3 rounded-2xl bg-white/5 border border-white/10 text-sm text-left flex items-center gap-2"><Ico n={ic} tile size={28} /><span>{s}</span></button>
                   ))}
                 </div>
               </div>
@@ -307,7 +336,7 @@ export default function App() {
                   <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                   {msg.anexo && (
                     <div className="mt-2">
-                      {msg.anexo.base64 ? <img src={msg.anexo.base64} className="rounded-xl w-full" alt="Anexo" /> : <div className="p-3 rounded-xl bg-black/20 text-sm font-bold">📄 {msg.anexo.name}</div>}
+                      {msg.anexo.base64 ? <img src={msg.anexo.base64} className="rounded-xl w-full" alt="Anexo" /> : <div className="p-3 rounded-xl bg-black/20 text-sm font-bold inline-flex items-center gap-2"><Ico n="arquivo" /> {msg.anexo.name}</div>}
                     </div>
                   )}
                   {msg.image && <ImagemComFallback url={msg.image} fallback={msg.fallback} />}
@@ -321,16 +350,16 @@ export default function App() {
             <div className="max-w-2xl mx-auto">
               {anexo && (
                 <div className="flex items-center gap-2 mb-2 p-2 rounded-2xl bg-white/10">
-                  {anexo.type.startsWith('image/') ? <img src={anexo.base64} className="w-10 h-10 rounded-lg object-cover" /> : <span className="text-xl">📄</span>}
+                  {anexo.type.startsWith('image/') ? <img src={anexo.base64} className="w-10 h-10 rounded-lg object-cover" /> : <Ico n="arquivo" tile size={36} />}
                   <span className="flex-1 text-xs truncate">{anexo.name}</span>
                   <button onClick={() => setAnexo(null)} className="px-3 py-1 rounded-full bg-white/10 text-xs font-bold">✕ Remover</button>
                 </div>
               )}
               {showAttach && (
                 <div className="grid grid-cols-3 gap-2 mb-2">
-                  <button onClick={() => openPicker('image/*')} className="py-3 rounded-2xl bg-white/10 font-bold text-sm">🖼️ Galeria</button>
-                  <button onClick={() => openPicker('image/*')} className="py-3 rounded-2xl bg-white/10 font-bold text-sm">📷 Câmera</button>
-                  <button onClick={() => openPicker('*/*')} className="py-3 rounded-2xl bg-white/10 font-bold text-sm">📄 Arquivo</button>
+                  <button onClick={() => openPicker('image/*')} className="py-3 rounded-2xl bg-white/10 font-bold text-sm inline-flex items-center justify-center gap-2"><Ico n="galeria" /> Galeria</button>
+                  <button onClick={() => openPicker('image/*')} className="py-3 rounded-2xl bg-white/10 font-bold text-sm inline-flex items-center justify-center gap-2"><Ico n="camera" /> Câmera</button>
+                  <button onClick={() => openPicker('*/*')} className="py-3 rounded-2xl bg-white/10 font-bold text-sm inline-flex items-center justify-center gap-2"><Ico n="arquivo" /> Arquivo</button>
                 </div>
               )}
               <div className="flex gap-2 items-end">
