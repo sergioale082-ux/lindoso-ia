@@ -239,10 +239,12 @@ export default function App() {
       } else {
         // Texto: tenta o modelo escolhido e, se falhar, passa pro próximo até alguém responder
         const system = 'Você é o LINDOSO IA, assistente brasileiro, simpático, direto. Responda em português, curto e útil. Se pedirem um arquivo ou código, entregue o conteúdo completo dentro de um bloco de código. Hoje é ' + new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + '.'
-        const contents = [...historicoAtual.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text }] }]
+        // avisos e erros antigos não entram na memória (senão a IA repete "coloque a chave")
+        const historicoLimpo = historicoAtual.filter(m => m.role === 'user' || m.via)
+        const contents = [...historicoLimpo.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text }] }]
         const nomes = { gemini: 'Gemini', relampago: 'Relâmpago', reserva: 'Groq GPT-OSS 120b', deepseek: 'DeepSeek' }
         const tentar = {
-          gemini: async () => { const r = await falarComGemini(text, historicoAtual, anexoAtual); if (r.error) throw new Error('sem chave'); return { text: r.text } },
+          gemini: async () => { const r = await falarComGemini(text, historicoLimpo, anexoAtual); if (r.error) throw new Error('sem chave'); return { text: r.text } },
           relampago: async () => { const r = await askRelampago({ apiKey: groqKey, contents, system }); return { text: r.text, rotulo: r.rotulo } },
           reserva: async () => { const r = await askReserva({ apiKey: groqKey, contents, system }); return { text: r.text } },
           deepseek: async () => { const r = await askDeepSeek({ apiKey: deepseekKey, contents, system }); return { text: r.text } },
