@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import logo from './logo.png'
 
 const uid = () => Math.random().toString(36).slice(2, 10)
 const LS = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d } catch { return d } }
@@ -246,7 +247,7 @@ export default function App() {
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-[#0b0b0c] text-white' : 'bg-zinc-50 text-black'}`}>
       <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 bg-[#0b0b0c]/90 backdrop-blur border-b border-white/10">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-400 to-violet-500 flex items-center justify-center font-black">L</div>
+          <img src={logo} alt="LINDOSO IA" className="w-9 h-9 rounded-full object-cover" />
           <div><p className="font-bold leading-none">LINDOSO IA</p><p className="text-[11px] opacity-60">Online • v6 Arrumado</p></div>
         </div>
         <div className="flex gap-2">
@@ -321,7 +322,7 @@ export default function App() {
           <div ref={scrollRef} className="max-w-2xl mx-auto px-4 pb-40 pt-2 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
             {!activeChat || activeChat.messages.length === 0 ? (
               <div className="text-center pt-10">
-                <div className="w-20 h-20 mx-auto rounded-[28px] bg-gradient-to-br from-teal-400 to-violet-500 flex items-center justify-center text-4xl font-black mb-4">L</div>
+                <img src={logo} alt="LINDOSO IA" className="w-20 h-20 mx-auto rounded-[28px] object-cover mb-4" />
                 <h1 className="text-2xl font-black">Olá, eu sou o LINDOSO IA</h1>
                 <p className="opacity-60 text-sm mt-2">Manda foto, arquivo ou pede pra criar imagem.</p>
                 <div className="grid grid-cols-2 gap-2 mt-6 text-left">
