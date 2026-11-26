@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import logo from './logo.png'
+import { escolherModelo, askRelampago, askReserva } from './rapido.js'
+import { gerarImagem } from './flux.js'
+import { askDeepSeek } from './deepseek.js'
 
 const uid = () => Math.random().toString(36).slice(2, 10)
 const LS = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d } catch { return d } }
@@ -164,6 +167,9 @@ export default function App() {
   const [memLimit, setMemLimit] = useState(() => LS('lindoso_memoria_limite', 20))
   const [theme, setTheme] = useState(() => LS('lindoso_tema', 'dark'))
   const [geminiKey, setGeminiKey] = useState(() => LS('lindoso_gemini_key', ''))
+  const [groqKey, setGroqKey] = useState(() => LS('lindoso_groq_key', ''))
+  const [deepseekKey, setDeepseekKey] = useState(() => LS('lindoso_deepseek_key', ''))
+  const [modeloAtual, setModeloAtual] = useState('')
   const [showAttach, setShowAttach] = useState(false)
   const [anexo, setAnexo] = useState(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -174,6 +180,8 @@ export default function App() {
   useEffect(() => { saveLS('lindoso_chats', chats) }, [chats])
   useEffect(() => { sessionStorage.setItem('lindoso_view', view); sessionStorage.setItem('lindoso_active', activeId || '') }, [view, activeId])
   useEffect(() => { saveLS('lindoso_qualidade_imagem', imgQ); saveLS('lindoso_memoria_limite', memLimit); saveLS('lindoso_tema', theme); saveLS('lindoso_gemini_key', geminiKey) }, [imgQ, memLimit, theme, geminiKey])
+
+  useEffect(() => { saveLS('lindoso_groq_key', groqKey); saveLS('lindoso_deepseek_key', deepseekKey) }, [groqKey, deepseekKey])
 
   const activeChat = chats.find(c => c.id === activeId) || null
 
@@ -218,26 +226,52 @@ export default function App() {
     const userMsg = { id: uid(), role: 'user', text, ts: Date.now(), anexo: anexoAtual ? { name: anexoAtual.name, type: anexoAtual.type, base64: anexoAtual.type.startsWith('image/') ? anexoAtual.base64 : null } : null }
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.messages.length === 0 ? text.slice(0, 30) : c.title, messages: [...c.messages, userMsg] } : c))
     setLoading(true)
+    const addMsg = (modelMsg) => setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
     try {
-      const isImage = !anexoAtual && /imagem|foto|logo|desenho|cria uma|gera uma|ilustra|criar imagem|pizza|praia|gato|cachorro/i.test(text)
-      if (isImage) {
-        const img = await gerarImagemHD(text)
-        const modelMsg = { id: uid(), role: 'model', text: 'Aqui está sua imagem! Toque para ampliar, baixar ou compartilhar.', image: img.url, fallback: img.fallback, ts: Date.now() }
-        setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+      const escolha = escolherModelo(text, { temAnexo: !!anexoAtual })
+      if (escolha === 'flux') {
+        // Imagem: FLUX primeiro; se falhar, o gerador antigo (Pollinations) assume
+        setModeloAtual('FLUX')
+        const reserva = await gerarImagemHD(text)
+        let imgUrl = reserva.url, via = 'Pollinations'
+        try { const f = await gerarImagem({ texto: text, groqKey }); imgUrl = f.url; via = 'FLUX' } catch {}
+        addMsg({ id: uid(), role: 'model', text: 'Aqui está sua imagem! Toque para ampliar, baixar ou compartilhar.', image: imgUrl, fallback: reserva.fallback, via, ts: Date.now() })
       } else {
-        const res = await falarComGemini(text, historicoAtual, anexoAtual)
-        if (res.error === 'sem-chave') {
-          const modelMsg = { id: uid(), role: 'model', text: 'Atenção: pra eu conversar e analisar foto/arquivo, coloca tua chave do Gemini nas Configurações (engrenagem no topo).', ts: Date.now() }
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+        // Texto: tenta o modelo escolhido e, se falhar, passa pro próximo até alguém responder
+        const system = 'Você é o LINDOSO IA, assistente brasileiro, simpático, direto. Responda em português, curto e útil. Se pedirem um arquivo ou código, entregue o conteúdo completo dentro de um bloco de código. Hoje é ' + new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + '.'
+        const contents = [...historicoAtual.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text }] }]
+        const nomes = { gemini: 'Gemini', relampago: 'Relâmpago', reserva: 'Groq GPT-OSS 120b', deepseek: 'DeepSeek' }
+        const tentar = {
+          gemini: async () => { const r = await falarComGemini(text, historicoAtual, anexoAtual); if (r.error) throw new Error('sem chave'); return { text: r.text } },
+          relampago: async () => { const r = await askRelampago({ apiKey: groqKey, contents, system }); return { text: r.text, rotulo: r.rotulo } },
+          reserva: async () => { const r = await askReserva({ apiKey: groqKey, contents, system }); return { text: r.text } },
+          deepseek: async () => { const r = await askDeepSeek({ apiKey: deepseekKey, contents, system }); return { text: r.text } },
+        }
+        const ordens = { gemini: ['gemini', 'reserva', 'relampago', 'deepseek'], relampago: ['relampago', 'reserva', 'gemini', 'deepseek'], deepseek: ['deepseek', 'reserva', 'gemini', 'relampago'] }
+        const temChave = { gemini: !!geminiKey, relampago: !!groqKey, reserva: !!groqKey, deepseek: !!deepseekKey }
+        const fila = (ordens[escolha] || ordens.gemini).filter(k => temChave[k])
+        if (fila.length === 0) {
+          addMsg({ id: uid(), role: 'model', text: 'Atenção: pra eu responder, coloca pelo menos uma chave (Gemini ou Groq) nas Configurações (engrenagem no topo).', ts: Date.now() })
         } else {
-          const modelMsg = { id: uid(), role: 'model', text: res.text, ts: Date.now() }
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+          let resposta = null, falhas = []
+          for (const k of fila) {
+            setModeloAtual(nomes[k])
+            try { const r = await tentar[k](); resposta = { ...r, k }; break } catch (e) { falhas.push(nomes[k] + ': ' + (e.message || 'erro')) }
+          }
+          if (resposta) {
+            let via = resposta.rotulo || ('Respondido por ' + nomes[resposta.k])
+            if (resposta.k !== fila[0]) via += ' (o ' + nomes[fila[0]] + ' estava indisponível)'
+            if (anexoAtual && resposta.k !== 'gemini') via += ' · não consegui ver o anexo'
+            addMsg({ id: uid(), role: 'model', text: resposta.text, via, ts: Date.now() })
+          } else {
+            addMsg({ id: uid(), role: 'model', text: 'Nenhum modelo respondeu agora. Tente de novo em instantes.\n\n' + falhas.join('\n'), ts: Date.now() })
+          }
         }
       }
     } catch (e) {
-      const modelMsg = { id: uid(), role: 'model', text: 'Deu erro: ' + e.message, ts: Date.now() }
-      setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, modelMsg] } : c))
+      addMsg({ id: uid(), role: 'model', text: 'Deu erro: ' + e.message, ts: Date.now() })
     }
+    setModeloAtual('')
     setLoading(false)
   }
 
@@ -263,9 +297,17 @@ export default function App() {
           {/* 1 - CHAVES - SÓ CHAVE, NADA MAIS */}
           <section className="p-4 rounded-3xl bg-white/5 border border-white/10">
             <h3 className="font-bold mb-2 flex items-center gap-2"><Ico n="chave" tile size={26} /> Chaves da IA</h3>
-            <p className="text-sm opacity-70 mb-3">Cole sua chave do Gemini aqui 1 vez só. Ela fica salva só no seu celular.</p>
+            <p className="text-sm opacity-70 mb-3">Cole as chaves aqui 1 vez só. Elas ficam salvas só no seu celular. Se um modelo estiver lotado, o app tenta o próximo sozinho.</p>
+            <label className="text-xs opacity-60 mb-1 block">Gemini (principal)</label>
             <input value={geminiKey} onChange={e => setGeminiKey(e.target.value.trim())} placeholder="Cole sua chave AIza..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none" />
             <p className="text-xs opacity-50 mt-2">{geminiKey ? <span className="inline-flex items-center gap-1.5"><Ico n="ok" size={14} /> Chave salva! Pode voltar pro chat.</span> : <span className="inline-flex items-center gap-1.5"><Ico n="no" size={14} /> Sem chave - o chat vai pedir pra colocar.</span>}</p>
+            <label className="text-xs opacity-60 mt-4 mb-1 block">Groq (reserva, respostas rápidas e prompt de imagem)</label>
+            <input value={groqKey} onChange={e => setGroqKey(e.target.value.trim())} placeholder="Cole sua chave do Groq (gsk_...)" className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none" />
+            <p className="text-xs opacity-50 mt-2">{groqKey ? <span className="inline-flex items-center gap-1.5"><Ico n="ok" size={14} /> Chave do Groq salva.</span> : <span className="inline-flex items-center gap-1.5"><Ico n="no" size={14} /> Sem chave do Groq.</span>}</p>
+            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="block text-center mt-2 py-3 rounded-2xl bg-white/10 font-bold text-sm">Pegar chave grátis no Groq</a>
+            <label className="text-xs opacity-60 mt-4 mb-1 block">DeepSeek (criação de arquivos, opcional)</label>
+            <input value={deepseekKey} onChange={e => setDeepseekKey(e.target.value.trim())} placeholder="Cole sua chave do DeepSeek (sk-...)" className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none" />
+            <p className="text-xs opacity-50 mt-2">{deepseekKey ? <span className="inline-flex items-center gap-1.5"><Ico n="ok" size={14} /> Chave do DeepSeek salva.</span> : <span className="inline-flex items-center gap-1.5"><Ico n="no" size={14} /> Sem chave do DeepSeek.</span>}</p>
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="block text-center mt-3 py-3 rounded-2xl bg-white/10 font-bold text-sm">Pegar chave grátis no Google AI Studio</a>
           </section>
 
@@ -335,6 +377,7 @@ export default function App() {
               <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[85%] px-4 py-3 rounded-[22px] shadow-md ${msg.role === 'user' ? 'bg-teal-400 text-black rounded-br-md' : 'bg-[#161617] border border-white/5 rounded-bl-md'}`}>
                   <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                  {msg.via && <p className="text-[11px] opacity-50 mt-1">{msg.via}</p>}
                   {msg.anexo && (
                     <div className="mt-2">
                       {msg.anexo.base64 ? <img src={msg.anexo.base64} className="rounded-xl w-full" alt="Anexo" /> : <div className="p-3 rounded-xl bg-black/20 text-sm font-bold inline-flex items-center gap-2"><Ico n="arquivo" /> {msg.anexo.name}</div>}
@@ -344,7 +387,7 @@ export default function App() {
                 </div>
               </div>
             ))}
-            {loading && <p className="text-center text-sm opacity-60 animate-pulse">LINDOSO está pensando...</p>}
+            {loading && <p className="text-center text-sm opacity-60 animate-pulse">LINDOSO está pensando{modeloAtual ? ` (${modeloAtual})` : ''}...</p>}
           </div>
 
           <div className="fixed bottom-0 left-0 right-0 p-3 bg-[#0b0b0c]/95 backdrop-blur border-t border-white/10">
